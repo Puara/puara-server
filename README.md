@@ -1,4 +1,4 @@
-# Puara Audience
+# puara-server
 
 Browser-based audience interaction system for the
 [Satosphère](https://sat.qc.ca/) — the SAT's 18 m immersive dome.

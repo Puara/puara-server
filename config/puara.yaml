@@ -1,4 +1,4 @@
-# Puara Audience — artist/operator-facing configuration.
+# puara-server — artist/operator-facing configuration.
 # Values here seed the server-owned `global` state at startup; sensorRate,
 # interactionMode and emitRaw can then be changed live from the controller
 # dashboard without restarting.
