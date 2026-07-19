@@ -70,6 +70,54 @@ profile. That requires a **publicly valid certificate** for a real hostname:
 renewal (cron + API-capable DNS), or put a calendar reminder to renew before
 each show run. An expired certificate = nobody can join.
 
+### Which domain? (and does it cost anything?)
+
+The certificate is free (Let's Encrypt); the **domain** is the only thing that
+may cost money — and probably nothing here:
+
+- **`sat.qc.ca` is already on Cloudflare nameservers**, so a subdomain like
+  `connect.sat.qc.ca` needs zero new spend: SAT IT adds one DNS record and
+  issues a scoped API token. Preferred path.
+- A vanity domain like `puara.io` works identically but must be *registered*
+  first (`.io` runs ~$35–60 US/yr; as of 2026-07 `puara.io` appears
+  unregistered). There is no such thing as a free registrable domain —
+  free-subdomain services (DuckDNS & co.) do work with Let's Encrypt DNS-01
+  but are a fragile foundation for shows.
+
+### Cloudflare DNS-01, concretely
+
+Cloudflare is one of the best-supported DNS-01 providers:
+
+1. In the Cloudflare dashboard, create an **API token** with the single
+   permission `Zone → DNS → Edit`, scoped to the one zone (e.g. `sat.qc.ca`).
+2. On the show server:
+
+   ```sh
+   sudo apt install certbot python3-certbot-dns-cloudflare
+   # /etc/letsencrypt/cloudflare.ini (chmod 600):
+   #   dns_cloudflare_api_token = <token>
+   sudo certbot certonly \
+     --dns-cloudflare \
+     --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+     -d connect.sat.qc.ca
+   ```
+
+3. Point `httpsInfos` in `config/env-prod.yaml` at
+   `/etc/letsencrypt/live/connect.sat.qc.ca/fullchain.pem` and
+   `privkey.pem`. Certbot's systemd timer then renews automatically —
+   no port ever opened to the internet.
+
+Two Cloudflare-specific caveats:
+
+- The DNS record for the hostname must be **DNS-only (grey cloud), not
+  proxied**: the phones must reach the LAN server directly, and proxied
+  records can't point at private addresses anyway. DNS-only A records *may*
+  point at a LAN IP (e.g. `10.x.x.x`) — that plus the free cert is the whole
+  trick; alternatively use venue split-horizon DNS and keep no public record
+  at all.
+- Wildcard also works (`-d '*.sat.qc.ca'`) but a single explicit hostname is
+  the least-privilege option to ask IT for.
+
 ## WiFi / network checklist (audience scale)
 
 WiFi is the real bottleneck, not the server. For the SAT network team:

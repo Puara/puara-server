@@ -91,10 +91,20 @@ npm run bridge     # in a second terminal: OSC bridge (after `npm run build`)
   `oscdump 9000` or point ossia score at it.
 - Emulate a crowd without phones: `http://127.0.0.1:8000/?emulate=10`.
 
-**Real phones need HTTPS** (sensor APIs require a secure context) — see
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the mkcert setup (dev) and the
-Let's Encrypt / venue-DNS path (production), plus the audience-scale WiFi
-checklist.
+## HTTPS & certificates
+
+**Real phones require HTTPS**: browsers only expose the motion sensors and
+wake lock in a secure context, and on iOS a page-level certificate exception
+does *not* cover `wss://` — so a properly trusted certificate is not optional.
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) covers the whole topic:
+
+- **dev/lab**: [mkcert](https://github.com/FiloSottile/mkcert) local CA,
+  installed once on each test phone;
+- **production/audience**: a real hostname (e.g. `connect.sat.qc.ca`) with a
+  free Let's Encrypt certificate obtained via DNS-01 challenge — including the
+  concrete Cloudflare + certbot recipe, renewal, and why the server never
+  needs to be exposed to the internet;
+- the audience-scale WiFi checklist for the venue network team.
 
 ## Configuration (artist-facing)
 
@@ -136,6 +146,12 @@ demo driving an ossia scenario (M4), frozen namespace + artist guide (M5).
 Explicit non-goals for v1: phone audio playback, puara-gestures descriptor
 extraction (raw + simple aggregates only — richer descriptors happen
 ossia-side), accounts/persistence, public-internet deployment.
+
+## License
+
+[BSD 3-Clause](LICENSE), matching the
+[soundworks](https://github.com/collective-soundworks/soundworks) framework it
+is built on.
 
 ## Related projects
 
