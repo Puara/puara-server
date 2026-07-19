@@ -1,0 +1,10 @@
+name: Puara Audience
+author: Société des arts technologiques (SAT)
+clients:
+  player:
+    runtime: browser
+    default: true
+  controller:
+    runtime: browser
+  puara-bridge:
+    runtime: node

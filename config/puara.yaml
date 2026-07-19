@@ -1,0 +1,36 @@
+# Puara Audience — artist/operator-facing configuration.
+# Values here seed the server-owned `global` state at startup; sensorRate,
+# interactionMode and emitRaw can then be changed live from the controller
+# dashboard without restarting.
+
+# Sensor streaming ceiling in Hz, pushed to the phones. 100 Hz is an
+# R&D/small-N default (<= 5 devices) — browsers deliver what they deliver
+# (iOS Safari caps devicemotion around 60 Hz). Lower this for audiences.
+sensorRate: 100
+
+# Aggregate computation / OSC emission tick of the bridge, in Hz.
+bridgeTick: 30
+
+# Emit per-device raw streams (/puara/audience/<id>/...). At audience scale
+# disable and keep only aggregates + events.
+emitRaw: true
+
+# sensors = raw streams + touch + events | touch = touch + events | events-only = tap/shake only
+interactionMode: sensors
+
+# Dome sections. Each zone gets its own QR code (player URL + ?zone=<name>).
+# A plain QR (no param) lands in "default".
+zones:
+  - north
+  - east
+  - south
+  - west
+
+# checkin plugin capacity — hard cap on concurrent players.
+maxClients: 350
+
+# OSC destinations (UDP). First entry is typically ossia score; add a second
+# for SpatGRIS or debugging (oscdump).
+oscDestinations:
+  - host: 127.0.0.1
+    port: 9000

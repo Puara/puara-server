@@ -1,0 +1,7 @@
+{
+  "name": "puara-server",
+  "createVersion": "6.0.1",
+  "template": "js",
+  "templatePackage": "@soundworks/create",
+  "configFormat": "yaml"
+}
