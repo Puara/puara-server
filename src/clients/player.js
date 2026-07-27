@@ -82,7 +82,10 @@ async function main($container) {
 
     const magnitude = Math.hypot(...frame.accel);
     const now = performance.now();
-    if (magnitude > SHAKE_THRESHOLD && now - lastShakeTime > SHAKE_DEBOUNCE) {
+    if (global.get('running')
+      && magnitude > SHAKE_THRESHOLD
+      && now - lastShakeTime > SHAKE_DEBOUNCE
+    ) {
       lastShakeTime = now;
       player.set({ shake: magnitude - SHAKE_THRESHOLD });
     }
@@ -101,16 +104,34 @@ async function main($container) {
     clearInterval(sensorTimer);
     const rate = global.get('sensorRate');
     sensorTimer = setInterval(() => {
-      if (global.get('interactionMode') !== 'sensors' || !frame.dirty) {
+      // `running` gates the streams so panic is a single reversible switch —
+      // without it, pausing had to clobber interactionMode to stop the sensors.
+      if (!global.get('running')
+        || global.get('interactionMode') !== 'sensors'
+        || !frame.dirty
+      ) {
         return;
       }
       frame.dirty = false;
+
+      // only enabled streams go on the wire; still one batched update per tick,
+      // so this saves bytes — lower `sensorRate` to save packets.
+      const payload = {};
+      if (global.get('streamAccel')) {
+        payload.accel = frame.accel;
+      }
+      if (global.get('streamGyro')) {
+        payload.gyro = frame.gyro;
+      }
+      if (global.get('streamOrientation')) {
+        payload.orientation = frame.orientation;
+      }
+      if (Object.keys(payload).length === 0) {
+        return;
+      }
+
       sentCount += 1;
-      player.set({
-        accel: frame.accel,
-        gyro: frame.gyro,
-        orientation: frame.orientation,
-      });
+      player.set(payload);
     }, 1000 / rate);
   }
   startSensorLoop();
@@ -142,6 +163,10 @@ async function main($container) {
     if (e.buttons === 0 && e.pointerType === 'mouse') {
       return;
     }
+    // events-only keeps the surface for taps but sends no position
+    if (global.get('interactionMode') === 'events-only' || !global.get('streamTouch')) {
+      return;
+    }
     const x = Math.min(1, Math.max(0, e.clientX / window.innerWidth));
     const y = Math.min(1, Math.max(0, e.clientY / window.innerHeight));
     player.set({ touch: [x, y] });
@@ -158,8 +183,8 @@ async function main($container) {
   function renderApp() {
     const running = global.get('running');
     const scene = global.get('scene');
-    const mode = global.get('interactionMode');
-    const touchEnabled = running && (mode === 'sensors' || mode === 'touch');
+    // the surface is needed in every mode: tap is an event, emitted always
+    const touchEnabled = running;
 
     let statusKey = 'waiting';
     if (running) {

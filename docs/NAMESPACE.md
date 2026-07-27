@@ -20,13 +20,27 @@ Sent once at bridge startup, `connected` also on every join/leave.
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
-## Per-device (raw) — gated by `emitRaw`
+## Per-device (raw) — gated by `emitRaw` and by `streams`
 
 `<id>` is the integer index assigned by the checkin plugin (stable for the
 lifetime of a connection, recycled after disconnect). Raw streams follow each
 phone's effective sensor rate (see caveats below); messages are queued and
 flushed in batches at the bridge tick (`bridgeTick`, default 30 Hz). At
 audience scale set `emitRaw: false` and consume aggregates + events only.
+
+Two gates, deliberately different in reach:
+
+| gate | stops OSC output | stops the WiFi uplink |
+|---|---|---|
+| `emitRaw: false` | yes, all four raw addresses | **no** — phones keep streaming |
+| `streams.<name>: false` | yes, that address | yes, the field leaves the state update |
+
+So `streams` is the one to reach for when the *network* is the constraint —
+`emitRaw` only spares the OSC consumer. Both are live from the dashboard.
+
+With `streams.accel: false` the per-device `accel` address goes silent and the
+energy aggregates report `0` rather than the last value the states happen to
+hold. `streams.touch: false` likewise leaves `global/touchcount` at `0`.
 
 | address | types | units / range |
 |---|---|---|
