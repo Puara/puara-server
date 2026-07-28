@@ -27,20 +27,54 @@ export const playerDescription = {
     type: 'any',
     default: [0, 0, 0],
   },
-  // normalized [x, y] in 0-1, null when not touching
+  // normalized [x, y] in 0-1 of the primary pointer, null when not touching
   touch: {
     type: 'any',
     default: null,
     nullable: true,
   },
+  // every active pointer: [[x, y], ...] normalized 0-1, ordered by pointerId,
+  // capped at `maxTouches`. Empty when nothing is touching.
+  touches: {
+    type: 'any',
+    default: [],
+  },
   tap: {
     type: 'boolean',
     event: true,
   },
-  // intensity in m/s^2 above the shake threshold
+  // ## puara-gestures descriptors, computed on the phone (src/shared/gestures.js)
+  // Shake energy per axis: accumulates while shaking, decays to 0 when still.
+  // Not an event — a continuous signal. Was an event-on-threshold value before
+  // namespace 0.2.0; that behaviour is `jab`.
   shake: {
-    type: 'float',
-    event: true,
+    type: 'any',
+    default: [0, 0, 0],
+  },
+  // Signed acceleration span per axis over the rolling jab window. Latches on
+  // the last detected jab until the next one exceeds the threshold.
+  jab: {
+    type: 'any',
+    default: [0, 0, 0],
+  },
+  // Leaky integral of primary-pointer movement per screen axis, signed —
+  // direction of travel. [x, y].
+  brush: {
+    type: 'any',
+    default: [0, 0],
+  },
+  // Same on |movement|, so back-and-forth rubbing accumulates instead of
+  // cancelling out. [x, y].
+  rub: {
+    type: 'any',
+    default: [0, 0],
+  },
+  // { count, tap, dtap, ttap, press, hold, pressTime } from the touch surface
+  // used as a button. tap/dtap/ttap are momentary — high for a single tick.
+  button: {
+    type: 'any',
+    default: null,
+    nullable: true,
   },
   // 0-1, -1 when the Battery API is unavailable (iOS Safari)
   battery: {
@@ -106,6 +140,124 @@ export const globalDescription = {
   streamTouch: {
     type: 'boolean',
     default: true,
+  },
+  streamShake: {
+    type: 'boolean',
+    default: true,
+  },
+  streamJab: {
+    type: 'boolean',
+    default: true,
+  },
+  streamBrush: {
+    type: 'boolean',
+    default: true,
+  },
+  streamRub: {
+    type: 'boolean',
+    default: true,
+  },
+  streamButton: {
+    type: 'boolean',
+    default: true,
+  },
+  // Origin the QR codes point at, e.g. 'https://connect.sat.qc.ca:8000'. The
+  // server seeds it from config/puara.yaml, falling back to its own LAN
+  // address — the dashboard's own URL is wrong for phones whenever the
+  // operator opens it on localhost. Editable live from the dashboard.
+  publicAddress: {
+    type: 'string',
+    default: '',
+  },
+  // ## gesture settings — see src/shared/gestures.js and config/puara.yaml.
+  // Editing any of these rebuilds the detectors on every phone.
+  // shake: activity threshold in m/s^2 (gravity removed) — below it the
+  // integrator leaks instead of accumulating
+  shakeThreshold: {
+    type: 'float',
+    default: 0.5,
+    min: 0,
+    max: 50,
+  },
+  // shake values below this are reported as 0 instead of streamed, so idle
+  // phones do not emit sensor noise
+  shakeEmitThreshold: {
+    type: 'float',
+    default: 0.05,
+    min: 0,
+    max: 50,
+  },
+  shakeFastLeak: {
+    type: 'float',
+    default: 0.6,
+    min: 0,
+    max: 1,
+  },
+  shakeSlowLeak: {
+    type: 'float',
+    default: 0.3,
+    min: 0,
+    max: 1,
+  },
+  // Hz — how often the leak is applied; between applications the integrator
+  // accumulates without decay
+  shakeFrequency: {
+    type: 'integer',
+    default: 10,
+    min: 1,
+    max: 200,
+  },
+  // jab: m/s^2 span within the window that counts as a jab
+  jabThreshold: {
+    type: 'float',
+    default: 5,
+    min: 0,
+    max: 100,
+  },
+  jabWindow: {
+    type: 'integer',
+    default: 10,
+    min: 2,
+    max: 100,
+  },
+  brushLeak: {
+    type: 'float',
+    default: 0.7,
+    min: 0,
+    max: 1,
+  },
+  brushFrequency: {
+    type: 'integer',
+    default: 100,
+    min: 1,
+    max: 200,
+  },
+  brushScale: {
+    type: 'float',
+    default: 0.15,
+    min: 0,
+    max: 10,
+  },
+  // ms window in which repeated taps count as double/triple
+  buttonCountInterval: {
+    type: 'integer',
+    default: 200,
+    min: 50,
+    max: 2000,
+  },
+  // ms a press must last to register as a hold
+  buttonHoldInterval: {
+    type: 'integer',
+    default: 5000,
+    min: 100,
+    max: 20000,
+  },
+  // upper bound on simultaneous pointers reported per phone
+  maxTouches: {
+    type: 'integer',
+    default: 5,
+    min: 1,
+    max: 10,
   },
   zones: {
     type: 'any',

@@ -160,10 +160,43 @@ Everything tunable lives in [`config/puara.yaml`](config/puara.yaml):
 `sensorRate` (ceiling, Hz), `bridgeTick` (aggregate/OSC tick, Hz), `emitRaw`
 (per-device raw streams on/off), `interactionMode`
 (`sensors` / `touch` / `events-only`), `zones` (dome sections → QR codes),
-`streams` (per-stream accel/gyro/orientation/touch enable — gates the phone
-uplink, not just the OSC output), `maxClients`, `oscDestinations`.
-`sensorRate`, `interactionMode`, `emitRaw` and `streams` can also be changed
-**live** from the controller dashboard.
+`streams` (per-stream enable for accel/gyro/orientation/touch and each gesture
+descriptor — gates the phone uplink, not just the OSC output), `publicAddress`
+(origin the QR codes point at), `maxTouches`, `gestures` (puara-gestures
+constants), `maxClients`, `oscDestinations`. Everything except
+`bridgeTick`/`maxClients`/`oscDestinations` can also be changed **live** from
+the controller dashboard.
+
+### Gestures
+
+Phones compute the [puara-gestures](https://github.com/Puara/puara-gestures)
+descriptors locally ([`src/shared/gestures.js`](src/shared/gestures.js)) and
+send those, so the network carries gestures rather than the motion behind them:
+
+| descriptor | OSC | behaviour |
+|---|---|---|
+| `shake` | `fff` | energy per axis, accumulates while shaking, decays to 0 |
+| `jab` | `fff` | signed acceleration span, latches on the last hit |
+| `brush` | `ff` | signed touch travel per screen axis |
+| `rub` | `ff` | unsigned, so back-and-forth accumulates |
+| `button` | see below | `count`/`tap`/`dtap`/`ttap`/`press`/`hold`/`presstime` |
+
+Multi-touch is on: `touch/count` plus `touch/<n>` per pointer, up to
+`maxTouches`. Every constant is editable live in the dashboard's *Gesture
+settings* panel — thresholds, leak rates, tap window, hold time. Full contract
+in [`docs/NAMESPACE.md`](docs/NAMESPACE.md).
+
+**Upgrading from namespace 0.1.0:** `/shake` was an event float on a threshold
+crossing; that measurement is now `/jab fff` and `/shake fff` is the continuous
+energy signal. Patches listening for the old `/shake f` should move to `/jab`.
+
+### QR code address
+
+QR codes point at `publicAddress`, never the dashboard's own URL — an operator
+with the dashboard open on `localhost` would otherwise print QR codes no phone
+can reach. Leave it blank and the server uses its own LAN address; set it to a
+hostname (`https://connect.sat.qc.ca:8000`) when one points at the machine. The
+dashboard has an editable field for it and regenerates the codes on change.
 
 Environment config (port, HTTPS certs) follows the soundworks convention:
 `config/env-default.yaml`, overridden by `ENV=<name>` →

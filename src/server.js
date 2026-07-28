@@ -1,3 +1,5 @@
+import { networkInterfaces } from 'node:os';
+
 import '@soundworks/helpers/polyfills.js';
 import '@soundworks/helpers/catch-unhandled-errors.js';
 import { Server } from '@soundworks/core/server.js';
@@ -37,6 +39,27 @@ server.stateManager.defineClass('bridge-status', bridgeStatusDescription);
 
 await server.start();
 
+const { useHttps, port, serverAddress } = server.config.env;
+const protocol = useHttps ? 'https' : 'http';
+
+// The QR codes must point at an address a phone can reach, which is never the
+// dashboard's own origin when the operator opens it on localhost. Prefer the
+// configured public address (a hostname behind a real certificate), then the
+// configured serverAddress, then the first non-internal IPv4 interface.
+function detectLanAddress() {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family === 'IPv4' && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
+const publicAddress = puara.publicAddress
+  || `${protocol}://${serverAddress || detectLanAddress()}:${port}`;
+
 const global = await server.stateManager.create('global', {
   sensorRate: puara.sensorRate,
   interactionMode: puara.interactionMode,
@@ -45,15 +68,22 @@ const global = await server.stateManager.create('global', {
   streamGyro: puara.streams.gyro,
   streamOrientation: puara.streams.orientation,
   streamTouch: puara.streams.touch,
+  streamShake: puara.streams.shake,
+  streamJab: puara.streams.jab,
+  streamBrush: puara.streams.brush,
+  streamRub: puara.streams.rub,
+  streamButton: puara.streams.button,
+  publicAddress,
+  maxTouches: puara.maxTouches,
+  ...puara.gestures,
   zones: puara.zones,
 });
 
-const { useHttps, port } = server.config.env;
-const protocol = useHttps ? 'https' : 'http';
-
+console.log(`Public address for QR codes: ${publicAddress}`);
+console.log(`  ${puara.publicAddress ? 'from config/puara.yaml' : 'auto-detected — set publicAddress in config/puara.yaml to override'}`);
 console.log('Player URLs per zone (QR codes available in the controller dashboard):');
 for (const zone of global.get('zones')) {
-  console.log(`- ${zone}: ${protocol}://<server-ip>:${port}/?zone=${zone}`);
+  console.log(`- ${zone}: ${publicAddress}/?zone=${zone}`);
 }
-console.log(`- default: ${protocol}://<server-ip>:${port}/`);
-console.log(`Controller dashboard: ${protocol}://<server-ip>:${port}/controller`);
+console.log(`- default: ${publicAddress}/`);
+console.log(`Controller dashboard: ${publicAddress}/controller`);

@@ -32,6 +32,45 @@ streams:
   gyro: true
   orientation: true
   touch: true
+  shake: true
+  jab: true
+  brush: true
+  rub: true
+  button: true
+
+# Origin the QR codes point at. Leave blank and the server uses its own LAN
+# address (env serverAddress, else the first non-internal IPv4 interface) —
+# never the dashboard's own URL, which is usually localhost and unreachable
+# from a phone. Set this when a hostname points at the server, e.g.
+# 'https://connect.sat.qc.ca:8000'. Editable live from the dashboard.
+publicAddress: ''
+
+# Upper bound on simultaneous pointers reported per phone.
+maxTouches: 5
+
+# puara-gestures descriptor constants (https://github.com/Puara/puara-gestures).
+# All editable live from the dashboard's "Gesture settings" panel; editing one
+# rebuilds that detector on every phone, resetting its accumulated state.
+gestures:
+  # shake — leaky integrator on gravity-free acceleration per axis: accumulates
+  # while moving above shakeThreshold, leaks below it, snaps to 0 near zero.
+  shakeThreshold: 0.5       # m/s^2
+  shakeEmitThreshold: 0.05  # report 0 below this, so idle phones send no noise
+  shakeFastLeak: 0.6        # leak while above threshold
+  shakeSlowLeak: 0.3        # leak while below (lower = faster decay)
+  shakeFrequency: 10        # Hz the leak is applied at
+  # jab — signed acceleration span inside a rolling window, latched until the
+  # next jab. This is what the pre-0.2.0 "shake" actually measured.
+  jabThreshold: 5           # m/s^2 span
+  jabWindow: 10             # samples
+  # brush/rub — leaky integrator on touch movement. brush is signed (direction
+  # of travel), rub uses |movement| so back-and-forth accumulates.
+  brushLeak: 0.7
+  brushFrequency: 100       # Hz
+  brushScale: 0.15
+  # button — the touch surface as a button: tap/dtap/ttap/press/hold.
+  buttonCountInterval: 200  # ms window for multi-tap
+  buttonHoldInterval: 5000  # ms a press must last to count as a hold
 
 # Dome sections. Each zone gets its own QR code (player URL + ?zone=<name>).
 # A plain QR (no param) lands in "default".
