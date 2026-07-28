@@ -86,6 +86,47 @@ async function bootstrap() {
       if ('touch' in updates && updates.touch !== null && globalState.get('streamTouch')) {
         enqueue(device.touch(id), ...updates.touch.map(f));
       }
+      // multi-touch: count always, then one address per pointer
+      if ('touches' in updates && globalState.get('streamTouch')) {
+        enqueue(device.touchCount(id), i(updates.touches.length));
+        updates.touches.forEach((point, n) => {
+          enqueue(device.touchPoint(id, n), ...point.map(f));
+        });
+      }
+    }
+
+    // ## gesture descriptors — emitted in every interaction mode, like events.
+    // `emitRaw` does not gate these: they are already the cheap, scalable
+    // representation raw streams get switched off in favour of.
+    if ('shake' in updates && globalState.get('streamShake')) {
+      enqueue(device.shake(id), ...updates.shake.map(f));
+    }
+    if ('jab' in updates && globalState.get('streamJab')) {
+      enqueue(device.jab(id), ...updates.jab.map(f));
+    }
+    if ('brush' in updates && globalState.get('streamBrush')) {
+      enqueue(device.brush(id), ...updates.brush.map(f));
+    }
+    if ('rub' in updates && globalState.get('streamRub')) {
+      enqueue(device.rub(id), ...updates.rub.map(f));
+    }
+    if ('button' in updates && updates.button !== null && globalState.get('streamButton')) {
+      const button = updates.button;
+      // tap/dtap/ttap are high for a single tick — emit them as bangs rather
+      // than streaming the zeros in between
+      if (button.tap) {
+        enqueue(device.buttonTap(id), i(1));
+      }
+      if (button.dtap) {
+        enqueue(device.buttonDtap(id), i(1));
+      }
+      if (button.ttap) {
+        enqueue(device.buttonTtap(id), i(1));
+      }
+      enqueue(device.buttonCount(id), i(button.count));
+      enqueue(device.buttonPress(id), i(button.press ? 1 : 0));
+      enqueue(device.buttonHold(id), i(button.hold ? 1 : 0));
+      enqueue(device.buttonPressTime(id), f(button.pressTime));
     }
 
     // events always pass, whatever the mode — they are what scales
@@ -93,9 +134,8 @@ async function bootstrap() {
       tapLog.push([Date.now(), player.get('zone')]);
       enqueue(device.tap(id), i(1));
     }
-    if ('shake' in updates && updates.shake !== null) {
-      enqueue(device.shake(id), f(updates.shake));
-    }
+    // shake is no longer an event: it is emitted as continuous 3-axis energy in
+    // the descriptor block above.
   });
 
   players.onAttach(player => {

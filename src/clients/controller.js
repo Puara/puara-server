@@ -18,6 +18,24 @@ import '@ircam/sc-components/sc-toggle.js';
 const METER_REFRESH = 200; // ms — decimated, don't render at sensor rate
 const RATE_WINDOW = 60; // s, join/leave rate window
 
+// Gesture settings panel. Ranges mirror the min/max in shared/schemas.js —
+// soundworks rejects out-of-range writes, so keep the two in step.
+const GESTURE_SETTINGS = [
+  { key: 'shakeThreshold', label: 'shake: threshold (m/s²)', min: 0, max: 50, step: 0.1 },
+  { key: 'shakeEmitThreshold', label: 'shake: emit floor', min: 0, max: 50, step: 0.01 },
+  { key: 'shakeFastLeak', label: 'shake: fast leak', min: 0, max: 1, step: 0.05 },
+  { key: 'shakeSlowLeak', label: 'shake: slow leak', min: 0, max: 1, step: 0.05 },
+  { key: 'shakeFrequency', label: 'shake: leak rate (Hz)', min: 1, max: 200, step: 1 },
+  { key: 'jabThreshold', label: 'jab: threshold (m/s²)', min: 0, max: 100, step: 0.5 },
+  { key: 'jabWindow', label: 'jab: window (samples)', min: 2, max: 100, step: 1 },
+  { key: 'brushLeak', label: 'brush/rub: leak', min: 0, max: 1, step: 0.05 },
+  { key: 'brushFrequency', label: 'brush/rub: leak rate (Hz)', min: 1, max: 200, step: 1 },
+  { key: 'brushScale', label: 'brush/rub: scale', min: 0, max: 10, step: 0.05 },
+  { key: 'buttonCountInterval', label: 'button: count window (ms)', min: 50, max: 2000, step: 10 },
+  { key: 'buttonHoldInterval', label: 'button: hold time (ms)', min: 100, max: 20000, step: 100 },
+  { key: 'maxTouches', label: 'max simultaneous touches', min: 1, max: 10, step: 1 },
+];
+
 async function main($container) {
   const config = loadConfig();
   const client = new Client(config);
@@ -59,14 +77,25 @@ async function main($container) {
     logEvent(leaveLog); renderApp(); 
   });
 
-  // per-zone QR codes, generated once from the page origin
-  const origin = window.location.origin;
-  const qrCodes = [];
-  for (const zone of global.get('zones')) {
-    const url = `${origin}/?zone=${zone}`;
-    qrCodes.push({ zone, url, dataUrl: await QRCode.toDataURL(url, { margin: 1, width: 256 }) });
+  // Per-zone QR codes built from `publicAddress`, NOT window.location.origin —
+  // the dashboard is often open on localhost, which no phone can reach.
+  // Regenerated whenever the operator edits the address.
+  let qrCodes = [];
+
+  async function buildQrCodes() {
+    const base = (global.get('publicAddress') || window.location.origin).replace(/\/+$/, '');
+    const targets = [
+      ...global.get('zones').map(zone => ({ zone, url: `${base}/?zone=${zone}` })),
+      { zone: 'default', url: `${base}/` },
+    ];
+    qrCodes = await Promise.all(targets.map(async ({ zone, url }) => ({
+      zone,
+      url,
+      dataUrl: await QRCode.toDataURL(url, { margin: 1, width: 256 }),
+    })));
+    renderApp();
   }
-  qrCodes.push({ zone: 'default', url: `${origin}/`, dataUrl: await QRCode.toDataURL(`${origin}/`, { margin: 1, width: 256 }) });
+  await buildQrCodes();
 
   function zoneCounts() {
     const counts = {};
@@ -99,6 +128,14 @@ async function main($container) {
 
         <section class="panel">
           <h2>Global controls</h2>
+          <div class="control-row">
+            <sc-text>public address (QR)</sc-text>
+            <sc-text
+              editable
+              value="${global.get('publicAddress')}"
+              @change="${e => global.set({ publicAddress: e.detail.value.trim() })}"
+            ></sc-text>
+          </div>
           <div class="control-row">
             <sc-text>running</sc-text>
             <sc-toggle
@@ -144,6 +181,11 @@ async function main($container) {
             ['streamGyro', 'gyro'],
             ['streamOrientation', 'orientation'],
             ['streamTouch', 'touch'],
+            ['streamShake', 'shake'],
+            ['streamJab', 'jab'],
+            ['streamBrush', 'brush'],
+            ['streamRub', 'rub'],
+            ['streamButton', 'button'],
           ].map(([key, label]) => html`
             <div class="control-row">
               <sc-text>stream: ${label}</sc-text>
@@ -158,6 +200,25 @@ async function main($container) {
               @input="${() => global.set({ running: false })}"
             ></sc-bang>
           </div>
+        </section>
+
+        <section class="panel">
+          <h2>Gesture settings</h2>
+          <p class="hint">
+            puara-gestures constants. Editing one rebuilds that detector on
+            every phone, so its accumulated state resets.
+          </p>
+          ${GESTURE_SETTINGS.map(({ key, label, min, max, step }) => html`
+            <div class="control-row">
+              <sc-text>${label}</sc-text>
+              <sc-number
+                min="${min}"
+                max="${max}"
+                step="${step}"
+                value="${global.get(key)}"
+                @change="${e => global.set({ [key]: e.detail.value })}"
+              ></sc-number>
+            </div>`)}
         </section>
 
         <section class="panel">
@@ -178,10 +239,17 @@ async function main($container) {
               const accel = p.get('accel');
               const level = Math.min(1, Math.hypot(...accel) / 30);
               const battery = p.get('battery');
+              // shake energy is the gesture worth watching while tuning
+              const shake = Math.hypot(...p.get('shake'));
+              const button = p.get('button');
+              const touches = p.get('touches').length;
               return html`
                 <div class="client-row">
                   <span class="client-id">#${p.get('id')} ${p.get('zone')}</span>
                   <span class="meter"><span class="meter-fill" style="width: ${level * 100}%"></span></span>
+                  <span title="shake energy">${shake.toFixed(1)}</span>
+                  <span title="active touches">${touches > 0 ? `${touches}✱` : '–'}</span>
+                  <span title="button">${button && button.hold ? 'hold' : button && button.press ? 'press' : '–'}</span>
                   <span>${p.get('effectiveRate').toFixed(0)} Hz</span>
                   <span>${battery >= 0 ? `${Math.round(battery * 100)}%` : '–'}</span>
                 </div>`;
@@ -203,7 +271,14 @@ async function main($container) {
     `, $container);
   }
 
-  global.onUpdate(() => renderApp());
+  global.onUpdate(updates => {
+    // the QR targets changed — rebuild them (buildQrCodes re-renders itself)
+    if ('publicAddress' in updates || 'zones' in updates) {
+      buildQrCodes();
+      return;
+    }
+    renderApp();
+  });
   // decimated refresh for activity meters instead of per-update rendering
   setInterval(renderApp, METER_REFRESH);
 
