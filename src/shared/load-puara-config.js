@@ -8,6 +8,7 @@ const DEFAULTS = {
   bridgeTick: 30,
   emitRaw: true,
   interactionMode: 'sensors',
+  streams: { accel: true, gyro: true, orientation: true, touch: true },
   zones: ['north', 'east', 'south', 'west'],
   maxClients: 350,
   oscDestinations: [{ host: '127.0.0.1', port: 9000 }],
@@ -24,5 +25,11 @@ export function loadPuaraConfig(root = process.cwd()) {
   }
 
   const parsed = YAML.parse(fs.readFileSync(pathname, 'utf-8')) || {};
-  return { ...DEFAULTS, ...parsed };
+  // `streams` is merged key by key: a partial block in the YAML (e.g. only
+  // `gyro: false`) must not drop the other streams to undefined.
+  return {
+    ...DEFAULTS,
+    ...parsed,
+    streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
+  };
 }

@@ -87,6 +87,26 @@ export const globalDescription = {
     type: 'boolean',
     default: true,
   },
+  // Per-stream enable. Read by BOTH the player (skips the field in its state
+  // update, so nothing crosses the WiFi) and the bridge (skips the OSC
+  // message). Gating only one side leaves the other spamming — `emitRaw`
+  // deliberately stays OSC-only, these are end-to-end.
+  streamAccel: {
+    type: 'boolean',
+    default: true,
+  },
+  streamGyro: {
+    type: 'boolean',
+    default: true,
+  },
+  streamOrientation: {
+    type: 'boolean',
+    default: true,
+  },
+  streamTouch: {
+    type: 'boolean',
+    default: true,
+  },
   zones: {
     type: 'any',
     default: ['default'],

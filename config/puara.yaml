@@ -18,6 +18,21 @@ emitRaw: true
 # sensors = raw streams + touch + events | touch = touch + events | events-only = tap/shake only
 interactionMode: sensors
 
+# Which raw streams the phones send at all. Unlike emitRaw (OSC output only),
+# these gate the phone→server WiFi uplink too: disabling a stream removes it
+# from the state update, so it never crosses the network. Only need
+# accelerometer? Set gyro and orientation to false. Live from the dashboard.
+#   bytes on the WiFi: accel/gyro/orientation ride in ONE batched update per
+#   tick, so dropping two of three cuts payload but not packet count — lower
+#   sensorRate to cut packets.
+#   OSC datagrams: one per address, so dropping two of three is a 3x cut.
+# tap, shake and status are events and are always emitted, in every mode.
+streams:
+  accel: true
+  gyro: true
+  orientation: true
+  touch: true
+
 # Dome sections. Each zone gets its own QR code (player URL + ?zone=<name>).
 # A plain QR (no param) lands in "default".
 zones:

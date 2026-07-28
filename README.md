@@ -79,17 +79,65 @@ installations; the full contract lives in [`docs/NAMESPACE.md`](docs/NAMESPACE.m
 
 ## Getting started
 
+Two scripts cover a Linux workstation or show machine end to end. No sudo.
+
+```sh
+./scripts/install.sh     # dependencies, mkcert, LAN certificate, env, build
+./scripts/start.sh       # soundworks server + OSC bridge, Ctrl-C stops both
+```
+
+`install.sh` is **safe to rerun**: each step checks its own result and skips.
+Nothing existing is overwritten — neither `certs/*.pem` nor
+`config/env-dev.yaml`. Delete the file yourself to have it regenerated. What it
+does: verifies Node ≥ 18 · `npm install` · fetches mkcert to `~/.local/bin`
+(checksum-pinned) if missing · issues a certificate for the detected LAN IP,
+hostname and localhost · writes `config/env-dev.yaml` pointing at it · builds.
+Use `--no-https` for a desktop-only setup (no phone sensors).
+
+`start.sh` flags:
+
+| flag | effect |
+|---|---|
+| *(none)* | `ENV=dev` (HTTPS) if `config/env-dev.yaml` exists, else `default` (HTTP) |
+| `--env <name>` | pick `config/env-<name>.yaml` explicitly |
+| `--no-bridge` | server only |
+| `--dump` | also run `oscdump` on the first configured OSC port |
+| `--serve-ca` | serve the mkcert root CA over HTTP :8001 so a phone can install it |
+
+Manual equivalent, if you prefer separate terminals:
+
 ```sh
 npm install
 npm run dev        # build + watch, server on http://127.0.0.1:8000
 npm run bridge     # in a second terminal: OSC bridge (after `npm run build`)
 ```
 
-- Player (phones): `http://<server-ip>:8000/?zone=north`
-- Controller dashboard: `http://<server-ip>:8000/controller`
+- Player (phones): `https://<server-ip>:8000/?zone=north`
+- Controller dashboard: `https://<server-ip>:8000/controller`
 - OSC out: UDP `127.0.0.1:9000` by default — verify with
-  `oscdump 9000` or point ossia score at it.
+  `oscdump 9000` or point ossia score at it. Only one process can bind that
+  port: add a second entry to `oscDestinations` to feed a monitor and ossia at
+  the same time.
 - Emulate a crowd without phones: `http://127.0.0.1:8000/?emulate=10`.
+
+### Connecting a real phone
+
+1. `./scripts/install.sh`, then `./scripts/start.sh`.
+2. `./scripts/start.sh --serve-ca` in another terminal, open that URL on the
+   phone, install the CA. On iOS also enable it under Settings → General →
+   About → Certificate Trust Settings — the install alone is not enough, and
+   without it `wss://` fails silently while the page still loads. Stop serving
+   once enrolled.
+3. Open the player URL, tap **Commencer / Start** — that gesture is what
+   triggers the iOS motion permission prompt.
+4. On the dashboard, switch `running` on. Sensors are gated on it.
+
+Installing a local CA on a phone means whoever holds the CA private key
+(`$(mkcert -CAROOT)/rootCA-key.pem`, on the server) can impersonate any HTTPS
+site to that device. Use your own test hardware, keep the key on the machine
+that generated it, and remove the CA from the phone when testing is over.
+Audience devices must never install it — that is what the Let's Encrypt path in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) is for.
 
 ## HTTPS & certificates
 
@@ -112,8 +160,10 @@ Everything tunable lives in [`config/puara.yaml`](config/puara.yaml):
 `sensorRate` (ceiling, Hz), `bridgeTick` (aggregate/OSC tick, Hz), `emitRaw`
 (per-device raw streams on/off), `interactionMode`
 (`sensors` / `touch` / `events-only`), `zones` (dome sections → QR codes),
-`maxClients`, `oscDestinations`. `sensorRate`, `interactionMode` and `emitRaw`
-can also be changed **live** from the controller dashboard.
+`streams` (per-stream accel/gyro/orientation/touch enable — gates the phone
+uplink, not just the OSC output), `maxClients`, `oscDestinations`.
+`sensorRate`, `interactionMode`, `emitRaw` and `streams` can also be changed
+**live** from the controller dashboard.
 
 Environment config (port, HTTPS certs) follows the soundworks convention:
 `config/env-default.yaml`, overridden by `ENV=<name>` →

@@ -139,10 +139,23 @@ async function main($container) {
               @change="${e => global.set({ emitRaw: e.detail.value })}"
             ></sc-toggle>
           </div>
+          ${[
+            ['streamAccel', 'accel'],
+            ['streamGyro', 'gyro'],
+            ['streamOrientation', 'orientation'],
+            ['streamTouch', 'touch'],
+          ].map(([key, label]) => html`
+            <div class="control-row">
+              <sc-text>stream: ${label}</sc-text>
+              <sc-toggle
+                ?active="${global.get(key)}"
+                @change="${e => global.set({ [key]: e.detail.value })}"
+              ></sc-toggle>
+            </div>`)}
           <div class="control-row">
             <sc-text>panic (pause all)</sc-text>
             <sc-bang
-              @input="${() => global.set({ running: false, interactionMode: 'events-only' })}"
+              @input="${() => global.set({ running: false })}"
             ></sc-bang>
           </div>
         </section>

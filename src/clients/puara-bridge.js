@@ -70,17 +70,20 @@ async function bootstrap() {
     const id = player.get('id');
     const emitRaw = globalState.get('emitRaw');
 
+    // each address is its own datagram, so a disabled stream removes messages
+    // one-for-one here — the players already skip it, this also covers states
+    // fed from elsewhere and updates in flight when a toggle flips.
     if (emitRaw) {
-      if ('accel' in updates) {
+      if ('accel' in updates && globalState.get('streamAccel')) {
         enqueue(device.accel(id), ...updates.accel.map(f));
       }
-      if ('gyro' in updates) {
+      if ('gyro' in updates && globalState.get('streamGyro')) {
         enqueue(device.gyro(id), ...updates.gyro.map(f));
       }
-      if ('orientation' in updates) {
+      if ('orientation' in updates && globalState.get('streamOrientation')) {
         enqueue(device.orientation(id), ...updates.orientation.map(f));
       }
-      if ('touch' in updates && updates.touch !== null) {
+      if ('touch' in updates && updates.touch !== null && globalState.get('streamTouch')) {
         enqueue(device.touch(id), ...updates.touch.map(f));
       }
     }
@@ -115,9 +118,14 @@ async function bootstrap() {
     let globalEnergy = 0;
     let touchCount = 0;
 
+    // energy is derived from accel; with that stream off the states keep their
+    // last value, so report 0 rather than a frozen number the piece would read
+    // as real motion.
+    const hasAccel = globalState.get('streamAccel');
+
     players.forEach(player => {
       const zoneName = player.get('zone');
-      const energy = Math.hypot(...player.get('accel'));
+      const energy = hasAccel ? Math.hypot(...player.get('accel')) : 0;
 
       zones[zoneName] = zones[zoneName] || { count: 0, energy: 0, taps: 0 };
       zones[zoneName].count += 1;

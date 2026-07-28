@@ -41,6 +41,10 @@ const global = await server.stateManager.create('global', {
   sensorRate: puara.sensorRate,
   interactionMode: puara.interactionMode,
   emitRaw: puara.emitRaw,
+  streamAccel: puara.streams.accel,
+  streamGyro: puara.streams.gyro,
+  streamOrientation: puara.streams.orientation,
+  streamTouch: puara.streams.touch,
   zones: puara.zones,
 });
 
