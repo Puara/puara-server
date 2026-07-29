@@ -15,6 +15,22 @@ artists configure interaction modes, zones, rates and OSC destinations in one
 YAML file ([`config/puara.yaml`](config/puara.yaml)) without touching
 framework internals.
 
+## Screenshots
+
+<img src="docs/images/player-touch-surface.jpg" alt="Player view on a phone: a 2×2 touch surface with labelled coloured regions and the bilingual Play / Data tabs" width="320">
+
+The player, on an audience phone: a `quad` touch surface designed from the
+dashboard — per-region label and colour, bilingual headline — and the
+*Jouer / Play* · *Données / Data* tabs, the second of which shows the device
+its own outgoing values.
+
+![Controller dashboard beside an oscdump of the OSC stream](docs/images/controller-dashboard.png)
+
+The controller dashboard (left) and `oscdump` of what reaches ossia score
+(right): audience counts and join/leave rate, global controls with per-stream
+toggles and panic, the touch-surface designer with its live preview, and the
+puara-gestures constants — all editable while the piece runs.
+
 ## Architecture
 
 ```
@@ -243,8 +259,9 @@ src/
     ├── strings.js            # FR/EN UI strings
     └── load-puara-config.js  # config/puara.yaml loader (node side)
 docs/
-├── NAMESPACE.md              # the OSC contract (versioned, currently 0.1.0)
-└── DEPLOYMENT.md             # certs, DNS, WiFi notes
+├── NAMESPACE.md              # the OSC contract (versioned, currently 0.3.0)
+├── DEPLOYMENT.md             # certs, DNS, WiFi notes
+└── images/                   # README screenshots
 ```
 
 ## Status & roadmap
