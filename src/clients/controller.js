@@ -6,11 +6,20 @@ import QRCode from 'qrcode';
 
 import '@ircam/sc-components/sc-bang.js';
 import '@ircam/sc-components/sc-button.js';
+import '@ircam/sc-components/sc-color-picker.js';
 import '@ircam/sc-components/sc-number.js';
 import '@ircam/sc-components/sc-select.js';
 import '@ircam/sc-components/sc-slider.js';
 import '@ircam/sc-components/sc-text.js';
 import '@ircam/sc-components/sc-toggle.js';
+
+import { tt } from '../shared/strings.js';
+import {
+  SPLITS,
+  gridGeometry,
+  normalizeRegions,
+  regionCount,
+} from '../shared/touch-layout.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -106,6 +115,44 @@ async function main($container) {
     return counts;
   }
 
+  // ## touch surface design
+  // Only the cells the current split actually shows. `touchRegions` always
+  // holds MAX_REGIONS entries, so switching split back and forth keeps the
+  // colours the operator picked.
+  function visibleRegions() {
+    return normalizeRegions(global.get('touchRegions'))
+      .slice(0, regionCount(global.get('touchSplit')));
+  }
+
+  // `touchRegions` is an `any` array, so soundworks cannot diff it for us —
+  // every edit is a read-modify-write of the whole thing.
+  function setRegion(index, patch) {
+    const regions = normalizeRegions(global.get('touchRegions'));
+    regions[index] = { ...regions[index], ...patch };
+    global.set({ touchRegions: regions });
+  }
+
+  // Phone-shaped preview, using the same geometry helper the players do, so
+  // what the operator sees here is what the audience gets.
+  function renderTouchPreview() {
+    const { cols, rows } = gridGeometry(global.get('touchSplit'));
+    const text = global.get('touchText').trim();
+
+    return html`
+      <div class="touch-preview">
+        <div class="touch-preview-grid"
+          style="grid-template-columns: repeat(${cols}, 1fr);
+                 grid-template-rows: repeat(${rows}, 1fr);"
+        >
+          ${visibleRegions().map((region, index) => html`
+            <div style="background-color: ${region.color}">
+              <span>${region.label || `#${index}`}</span>
+            </div>`)}
+        </div>
+        <p class="touch-preview-hint">${text || tt('touchHint')}</p>
+      </div>`;
+  }
+
   function renderApp() {
     const counts = zoneCounts();
     const bridge = bridgeStatus ? bridgeStatus.getValues() : null;
@@ -186,6 +233,7 @@ async function main($container) {
             ['streamBrush', 'brush'],
             ['streamRub', 'rub'],
             ['streamButton', 'button'],
+            ['streamRegion', 'region'],
           ].map(([key, label]) => html`
             <div class="control-row">
               <sc-text>stream: ${label}</sc-text>
@@ -200,6 +248,46 @@ async function main($container) {
               @input="${() => global.set({ running: false })}"
             ></sc-bang>
           </div>
+        </section>
+
+        <section class="panel touch-panel">
+          <h2>Touch surface</h2>
+          <p class="hint">
+            Applies live to every connected phone. Regions are numbered
+            left-to-right then top-to-bottom, and that index is what the bridge
+            sends as <code>/puara/audience/&lt;id&gt;/region</code> — enable the
+            <code>region</code> stream above to emit it.
+          </p>
+          <div class="control-row">
+            <sc-text>split</sc-text>
+            <sc-select
+              .options="${SPLITS}"
+              value="${global.get('touchSplit')}"
+              @change="${e => global.set({ touchSplit: e.detail.value })}"
+            ></sc-select>
+          </div>
+          <div class="control-row">
+            <sc-text>text (blank = FR/EN default)</sc-text>
+            <sc-text
+              editable
+              value="${global.get('touchText')}"
+              @change="${e => global.set({ touchText: e.detail.value })}"
+            ></sc-text>
+          </div>
+          ${visibleRegions().map((region, index) => html`
+            <div class="control-row">
+              <sc-text>region ${index}</sc-text>
+              <sc-text
+                editable
+                value="${region.label}"
+                @change="${e => setRegion(index, { label: e.detail.value })}"
+              ></sc-text>
+              <sc-color-picker
+                value="${region.color}"
+                @change="${e => setRegion(index, { color: e.detail.value })}"
+              ></sc-color-picker>
+            </div>`)}
+          ${renderTouchPreview()}
         </section>
 
         <section class="panel">
@@ -243,12 +331,14 @@ async function main($container) {
               const shake = Math.hypot(...p.get('shake'));
               const button = p.get('button');
               const touches = p.get('touches').length;
+              const region = p.get('region');
               return html`
                 <div class="client-row">
                   <span class="client-id">#${p.get('id')} ${p.get('zone')}</span>
                   <span class="meter"><span class="meter-fill" style="width: ${level * 100}%"></span></span>
                   <span title="shake energy">${shake.toFixed(1)}</span>
                   <span title="active touches">${touches > 0 ? `${touches}✱` : '–'}</span>
+                  <span title="touch region">${region >= 0 ? `r${region}` : '–'}</span>
                   <span title="button">${button && button.hold ? 'hold' : button && button.press ? 'press' : '–'}</span>
                   <span>${p.get('effectiveRate').toFixed(0)} Hz</span>
                   <span>${battery >= 0 ? `${Math.round(battery * 100)}%` : '–'}</span>

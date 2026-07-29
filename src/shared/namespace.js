@@ -1,10 +1,12 @@
 // Single source of truth for the OSC namespace — the contract lives in
 // docs/NAMESPACE.md and must match this file exactly.
 
+// 0.3.0 — touch surface sub-areas: per-device `region` and per-region audience
+// counts, driven by the layout authored on the dashboard.
 // 0.2.0 — `shake` changed from an event float to a continuous 3-axis energy
 // signal (puara-gestures semantics) and `jab` took over the old behaviour;
 // jab/brush/rub/button and multi-touch addresses added.
-export const NAMESPACE_VERSION = '0.2.0';
+export const NAMESPACE_VERSION = '0.3.0';
 
 const ROOT = '/puara/audience';
 
@@ -24,6 +26,8 @@ export const device = {
   touchPoint: (id, n) => `${ROOT}/${id}/touch/${n}`,
   tap: id => `${ROOT}/${id}/tap`,
   status: id => `${ROOT}/${id}/status`,
+  // index of the touch-surface sub-area under the primary finger, -1 on release
+  region: id => `${ROOT}/${id}/region`,
   // puara-gestures descriptors
   shake: id => `${ROOT}/${id}/shake`,
   jab: id => `${ROOT}/${id}/jab`,
@@ -48,4 +52,8 @@ export const global = {
   energy: () => `${ROOT}/global/energy`,
   taps: () => `${ROOT}/global/taps`,
   touchcount: () => `${ROOT}/global/touchcount`,
+  // how many phones are currently touching region <n> — the audience-scale
+  // answer the sub-areas exist for, emitted for every region of the current
+  // split so a piece can read them as a fixed-size set
+  regionCount: n => `${ROOT}/global/region/${n}/count`,
 };

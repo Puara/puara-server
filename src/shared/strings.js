@@ -8,6 +8,17 @@ export const strings = {
   touchHint: { fr: 'Touchez l’écran', en: 'Touch the screen' },
   over: { fr: 'Merci ! Le spectacle est terminé', en: 'Thanks! The show is over' },
   zone: { fr: 'Zone', en: 'Zone' },
+  tabPlay: { fr: 'Jouer', en: 'Play' },
+  tabData: { fr: 'Données', en: 'Data' },
+  dataHint: { fr: 'Ce que votre téléphone envoie', en: 'What your phone is sending' },
+  dataOff: { fr: 'désactivé', en: 'off' },
+  dataRate: { fr: 'Envois/s', en: 'Sends/s' },
+  dataBattery: { fr: 'Batterie', en: 'Battery' },
+  dataPaused: { fr: 'Rien n’est envoyé pour le moment', en: 'Nothing is being sent right now' },
+  dataTouchNote: {
+    fr: 'Le toucher se fait dans l’onglet Jouer',
+    en: 'Touch happens in the Play tab',
+  },
 };
 
 export function t(key, lang = 'fr') {

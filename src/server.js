@@ -73,8 +73,12 @@ const global = await server.stateManager.create('global', {
   streamBrush: puara.streams.brush,
   streamRub: puara.streams.rub,
   streamButton: puara.streams.button,
+  streamRegion: puara.streams.region,
   publicAddress,
   maxTouches: puara.maxTouches,
+  touchSplit: puara.touch.split,
+  touchText: puara.touch.text,
+  touchRegions: puara.touch.regions,
   ...puara.gestures,
   zones: puara.zones,
 });

@@ -8,6 +8,12 @@ import { html, render, nothing } from 'lit';
 
 import { tt } from '../shared/strings.js';
 import { createDetectors, GESTURE_PARAM_KEYS } from '../shared/gestures.js';
+import {
+  gridGeometry,
+  normalizeRegions,
+  regionAt,
+  regionCount,
+} from '../shared/touch-layout.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -15,6 +21,55 @@ import { createDetectors, GESTURE_PARAM_KEYS } from '../shared/gestures.js';
 const TAP_MAX_DURATION = 250; // ms
 // low-pass coefficient for the gravity estimate; ~0.5 s time constant at 60 Hz
 const GRAVITY_ALPHA = 0.03;
+// Hz the data tab re-renders at. Deliberately far below `sensorRate`: the panel
+// is for the audience to see itself in the stream, not a measurement tool, and
+// re-rendering at 100 Hz on a phone costs more than the sensors do.
+const DATA_REFRESH_RATE = 10;
+
+// Rows of the data tab, in the order they are shown. `stream` names the global
+// per-stream toggle, `modes` the interaction modes in which the field is sent
+// at all (null = every mode). Both must match the gating in `tick()`, otherwise
+// the panel claims to send something the phone is dropping.
+const DATA_ROWS = [
+  { key: 'accel', label: 'accel', unit: 'm/s²', stream: 'streamAccel', modes: ['sensors'] },
+  { key: 'gyro', label: 'gyro', unit: '°/s', stream: 'streamGyro', modes: ['sensors'] },
+  { key: 'orientation', label: 'orientation', unit: '°', stream: 'streamOrientation', modes: ['sensors'] },
+  { key: 'touch', label: 'touch', unit: '0-1', stream: 'streamTouch', modes: ['sensors', 'touch'] },
+  { key: 'touches', label: 'touches', unit: '0-1', stream: 'streamTouch', modes: ['sensors', 'touch'] },
+  { key: 'shake', label: 'shake', unit: '', stream: 'streamShake', modes: null },
+  { key: 'jab', label: 'jab', unit: '', stream: 'streamJab', modes: null },
+  { key: 'brush', label: 'brush', unit: '', stream: 'streamBrush', modes: null },
+  { key: 'rub', label: 'rub', unit: '', stream: 'streamRub', modes: null },
+  { key: 'button', label: 'button', unit: '', stream: 'streamButton', modes: null },
+  { key: 'region', label: 'region', unit: '', stream: 'streamRegion', modes: null },
+];
+
+function formatNumber(value) {
+  return typeof value === 'number' ? value.toFixed(2) : String(value);
+}
+
+// Renders whatever a descriptor holds — scalar, [x, y, z], [[x, y], ...] or the
+// button object — as one short monospace line.
+function formatValue(value) {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return '—';
+    }
+    if (Array.isArray(value[0])) {
+      return value.map(inner => `[${inner.map(formatNumber).join(' ')}]`).join(' ');
+    }
+    return value.map(formatNumber).join('  ');
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, entry]) => `${key}:${formatNumber(entry)}`)
+      .join(' ');
+  }
+  return formatNumber(value);
+}
 
 async function main($container) {
   const config = loadConfig();
@@ -177,6 +232,13 @@ async function main($container) {
     if (global.get('streamButton')) {
       addIfChanged(payload, 'button', detectors.button.getValues());
     }
+    // Region rides with the descriptors, not with `touch`: it is the cheap
+    // "which panel" signal a piece uses when raw coordinates are switched off.
+    // Derived from `primary`, not `lastTouchPos`, so it returns to -1 on release
+    // instead of latching on the last cell.
+    if (global.get('streamRegion')) {
+      addIfChanged(payload, 'region', regionAt(primary, global.get('touchSplit')));
+    }
 
     // ## raw streams — mode-gated, and only what is enabled. Still one batched
     // update per tick, so this saves bytes; lower `sensorRate` to save packets.
@@ -265,15 +327,124 @@ async function main($container) {
     // tap stays an immediate event rather than waiting for the next tick
     if (pointers.size === 0 && performance.now() - touchStartTime < TAP_MAX_DURATION) {
       player.set({ tap: true });
+      // `tap` is an event descriptor, so it has no readable current value —
+      // count locally for the data tab
+      tapCount += 1;
     }
   }
 
   // ## rendering
+  let activeTab = 'play';
+  let tapCount = 0;
+  let dataTimer = null;
+
+  // The data panel is the only thing that needs to follow the stream, so it
+  // drives its own repaint and nothing repaints while the Play tab is up.
+  function startDataRefresh() {
+    clearInterval(dataTimer);
+    dataTimer = null;
+    if (activeTab === 'data') {
+      dataTimer = setInterval(renderApp, 1000 / DATA_REFRESH_RATE);
+    }
+  }
+
+  function selectTab(tab) {
+    if (activeTab === tab) {
+      return;
+    }
+    activeTab = tab;
+    startDataRefresh();
+    renderApp();
+  }
+
+  // `region` is an integer, but a bare index means nothing to the person
+  // holding the phone — show the label they can see on the surface too.
+  function formatRegion(index) {
+    if (index < 0) {
+      return '—';
+    }
+    const label = normalizeRegions(global.get('touchRegions'))[index].label;
+    return label ? `${index} · ${label}` : String(index);
+  }
+
+  function renderDataPanel() {
+    const running = global.get('running');
+    const mode = global.get('interactionMode');
+    const battery = player.get('battery');
+
+    return html`
+      <section class="data-panel">
+        <p class="data-hint">${tt('dataHint')}</p>
+        ${running ? nothing : html`<p class="data-warning">${tt('dataPaused')}</p>`}
+        <ul class="data-summary">
+          <li>${tt('dataRate')}: ${player.get('effectiveRate').toFixed(0)}</li>
+          <li>${tt('dataBattery')}: ${battery < 0 ? '—' : `${Math.round(battery * 100)}%`}</li>
+          <li>mode: ${mode}</li>
+          <li>tap: ${tapCount}</li>
+        </ul>
+        <ul class="data-rows">
+          ${DATA_ROWS.map(row => {
+            // "sending" mirrors tick(): the toggle, the mode gate and the panic
+            // switch all have to be open for the field to leave the phone
+            const sending = running
+              && global.get(row.stream)
+              && (row.modes === null || row.modes.includes(mode));
+
+            return html`
+              <li class="data-row ${sending ? '' : 'muted'}">
+                <span class="data-label">${row.label}</span>
+                <span class="data-value">
+                  ${!sending
+                    ? tt('dataOff')
+                    : row.key === 'region'
+                      ? formatRegion(player.get('region'))
+                      : formatValue(player.get(row.key))
+                  }
+                </span>
+                <span class="data-unit">${sending ? row.unit : ''}</span>
+              </li>`;
+          })}
+        </ul>
+        <p class="data-note">${tt('dataTouchNote')}</p>
+      </section>`;
+  }
+
+  // The surface the audience actually touches, as designed on the dashboard.
+  // The sub-areas are painted by a grid *behind* the surface with
+  // `pointer-events: none`, so the pointer handlers stay on the one parent
+  // element and multi-touch tracking does not have to be split per cell.
+  function renderTouchSurface() {
+    const split = global.get('touchSplit');
+    const { cols, rows } = gridGeometry(split);
+    const regions = normalizeRegions(global.get('touchRegions'))
+      .slice(0, regionCount(split));
+    const text = global.get('touchText').trim();
+
+    return html`
+      <div class="touch-surface"
+        @pointerdown="${onPointerDown}"
+        @pointermove="${onPointerMove}"
+        @pointerup="${onPointerUp}"
+        @pointercancel="${onPointerUp}"
+      >
+        <div class="touch-regions"
+          style="grid-template-columns: repeat(${cols}, 1fr);
+                 grid-template-rows: repeat(${rows}, 1fr);"
+        >
+          ${regions.map(region => html`
+            <div class="touch-region" style="background-color: ${region.color}">
+              ${region.label ? html`<span>${region.label}</span>` : nothing}
+            </div>`)}
+        </div>
+        <p class="touch-hint">${text || tt('touchHint')}</p>
+      </div>`;
+  }
+
   function renderApp() {
     const running = global.get('running');
     const scene = global.get('scene');
     // the surface is needed in every mode: tap is an event, emitted always
-    const touchEnabled = running;
+    const touchEnabled = running && activeTab === 'play';
 
     let statusKey = 'waiting';
     if (running) {
@@ -289,21 +460,23 @@ async function main($container) {
           <span class="status-dot ${running ? 'running' : ''}"></span>
           <span>${tt('zone')}: ${zone} · #${player.get('id')}</span>
         </header>
-        ${touchEnabled
-          ? html`
-            <div class="touch-surface"
-              @pointerdown="${onPointerDown}"
-              @pointermove="${onPointerMove}"
-              @pointerup="${onPointerUp}"
-              @pointercancel="${onPointerUp}"
-            >
-              <p>${tt('touchHint')}</p>
-            </div>`
-          : nothing
-        }
-        <main>
-          <p class="status-message">${tt(statusKey)}</p>
+        ${touchEnabled ? renderTouchSurface() : nothing}
+        <main class="tab-${activeTab}">
+          ${activeTab === 'play'
+            ? html`<p class="status-message">${tt(statusKey)}</p>`
+            : renderDataPanel()
+          }
         </main>
+        <nav class="tab-bar">
+          <button
+            class="${activeTab === 'play' ? 'active' : ''}"
+            @click="${() => selectTab('play')}"
+          >${tt('tabPlay')}</button>
+          <button
+            class="${activeTab === 'data' ? 'active' : ''}"
+            @click="${() => selectTab('data')}"
+          >${tt('tabData')}</button>
+        </nav>
       </div>
     `, $container);
   }

@@ -162,8 +162,9 @@ Everything tunable lives in [`config/puara.yaml`](config/puara.yaml):
 (`sensors` / `touch` / `events-only`), `zones` (dome sections → QR codes),
 `streams` (per-stream enable for accel/gyro/orientation/touch and each gesture
 descriptor — gates the phone uplink, not just the OSC output), `publicAddress`
-(origin the QR codes point at), `maxTouches`, `gestures` (puara-gestures
-constants), `maxClients`, `oscDestinations`. Everything except
+(origin the QR codes point at), `maxTouches`, `touch` (touch surface design —
+see below), `gestures` (puara-gestures constants), `maxClients`,
+`oscDestinations`. Everything except
 `bridgeTick`/`maxClients`/`oscDestinations` can also be changed **live** from
 the controller dashboard.
 
@@ -189,6 +190,31 @@ in [`docs/NAMESPACE.md`](docs/NAMESPACE.md).
 **Upgrading from namespace 0.1.0:** `/shake` was an event float on a threshold
 crossing; that measurement is now `/jab fff` and `/shake fff` is the continuous
 energy signal. Patches listening for the old `/shake f` should move to `/jab`.
+
+### Touch surface
+
+What the audience sees and touches is designed in the dashboard's *Touch
+surface* panel, live on every connected phone, and seeded from the `touch` block
+of `config/puara.yaml`:
+
+- **split** — `single`, `columns` (left | right), `rows` (top / bottom) or
+  `quad` (2×2).
+- **text** — the headline across the surface. Blank keeps the built-in bilingual
+  *Touchez l'écran / Touch the screen*; your own text replaces it in both
+  languages, so write it bilingual.
+- **per-region label and colour** — one of each per sub-area. Keep colours dark:
+  a few hundred bright phone screens light the dome from the seats.
+
+Regions are numbered left-to-right then top-to-bottom, and that index reaches
+OSC as `/puara/audience/<id>/region` (`-1` on release) plus a per-region audience
+count on `/puara/audience/global/region/<n>/count`. Both are gated by
+`streams.region`, so a piece can consume "which panel" with raw `touch`
+switched off. Geometry and region math are shared by the dashboard preview, the
+phones and the bridge in
+[`src/shared/touch-layout.js`](src/shared/touch-layout.js).
+
+Audience members can check what their own phone is sending in the player's
+*Données / Data* tab.
 
 ### QR code address
 

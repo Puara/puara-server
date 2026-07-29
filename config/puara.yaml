@@ -37,6 +37,7 @@ streams:
   brush: true
   rub: true
   button: true
+  region: true
 
 # Origin the QR codes point at. Leave blank and the server uses its own LAN
 # address (env serverAddress, else the first non-internal IPv4 interface) —
@@ -47,6 +48,33 @@ publicAddress: ''
 
 # Upper bound on simultaneous pointers reported per phone.
 maxTouches: 5
+
+# Touch surface design. Everything here is editable live from the dashboard's
+# "Touch surface" panel, which is where you would normally work — this block is
+# the starting point the server boots with.
+touch:
+  # single  = one full-screen area
+  # columns = left | right
+  # rows    = top / bottom
+  # quad    = 2x2
+  # Regions are numbered left-to-right then top-to-bottom, and that index is
+  # what reaches OSC as /puara/audience/<id>/region (enable streams.region).
+  split: single
+
+  # Headline across the surface. Leave blank for the built-in bilingual
+  # "Touchez l'écran / Touch the screen"; anything you type here replaces it in
+  # both languages, so write it bilingual yourself.
+  text: ''
+
+  # Always list four, even when the split shows fewer: the extras are kept so
+  # switching quad -> columns -> quad gives your colours back. Colours must be
+  # 6-digit hex; anything else falls back to the default for that slot.
+  # Keep them dark — four bright phone screens light the dome from the seats.
+  regions:
+    - { label: '', color: '#1b3a6b' }
+    - { label: '', color: '#6b1b3a' }
+    - { label: '', color: '#1b6b4a' }
+    - { label: '', color: '#6b5a1b' }
 
 # puara-gestures descriptor constants (https://github.com/Puara/puara-gestures).
 # All editable live from the dashboard's "Gesture settings" panel; editing one

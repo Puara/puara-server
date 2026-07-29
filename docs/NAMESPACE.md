@@ -1,4 +1,4 @@
-# OSC Namespace — `/puara/audience` (v0.2.0)
+# OSC Namespace — `/puara/audience` (v0.3.0)
 
 This document is the **contract** between the puara-bridge and everything
 downstream (ossia score, SpatGRIS, piece logic). The single source of truth in
@@ -16,7 +16,7 @@ Sent once at bridge startup, `connected` also on every join/leave.
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.2.0"` |
+| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.3.0"` |
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
@@ -83,6 +83,7 @@ the dashboard's *Gesture settings* panel (see `gestures` in
 | `/puara/audience/<id>/button/press` | `i` | `1` while a finger is down, `0` on release |
 | `/puara/audience/<id>/button/hold` | `i` | `1` once a press passes `buttonHoldInterval` |
 | `/puara/audience/<id>/button/presstime` | `f` | ms the last press lasted |
+| `/puara/audience/<id>/region` | `i` | index of the touch-surface sub-area under the **primary** pointer, `-1` on release |
 
 Behaviour worth knowing before patching against these:
 
@@ -105,6 +106,40 @@ Behaviour worth knowing before patching against these:
 - A descriptor is only sent when its value changed, so idle phones cost nothing
   on the wire.
 
+## Touch surface regions
+
+The touch surface is designed on the dashboard ("Touch surface" panel) and
+seeded from the `touch` block of [`config/puara.yaml`](../config/puara.yaml):
+a split, a headline, and a label + colour per sub-area. Region math and
+geometry live in
+[`src/shared/touch-layout.js`](../src/shared/touch-layout.js).
+
+| `split` | regions | numbering |
+|---|---|---|
+| `single` | 1 | `0` — whole screen |
+| `columns` | 2 | `0` left, `1` right |
+| `rows` | 2 | `0` top, `1` bottom |
+| `quad` | 4 | `0` top-left, `1` top-right, `2` bottom-left, `3` bottom-right |
+
+Always left-to-right, then top-to-bottom.
+
+- `region` is a **descriptor**, not a raw stream: it is emitted in every
+  `interactionMode` and is not gated by `emitRaw`. It has its own
+  `streams.region` toggle, so a piece can consume "which panel" at audience
+  scale with `touch` switched off entirely.
+- The split is exactly at 0.5, and the boundary itself belongs to the **higher**
+  index: `x < 0.5` is region `0` of a `columns` split, `x == 0.5` is region `1`.
+  The 2 px visual seam between cells is cosmetic and does not shift the split.
+- Changing the split on the dashboard does **not** re-emit `region` for phones
+  that are not touching; a phone reports its new index on the next touch. The
+  `global/region/<n>/count` aggregate discards indices outside the current
+  geometry, so a stale value never inflates a count.
+- All four `global/region/<n>/count` addresses are emitted at every tick
+  regardless of split, so narrowing `quad` → `columns` drives regions 2 and 3 to
+  `0` instead of leaving a patch latched on their last count.
+- `region` follows the **primary** pointer only, like `touch` and `brush`/`rub`.
+  Multi-touch across several regions is visible in `touch/<n>`, not here.
+
 ## Zone aggregates — always emitted, at `bridgeTick`
 
 `<zone>` is a zone name from `config/puara.yaml` (phones join a zone through
@@ -124,6 +159,7 @@ Only zones with at least one connected player are emitted.
 | `/puara/audience/global/energy` | `f` | mean accel magnitude across all players, m/s² |
 | `/puara/audience/global/taps` | `f` | taps/second across all players, 2 s window |
 | `/puara/audience/global/touchcount` | `i` | players currently touching the screen |
+| `/puara/audience/global/region/<n>/count` | `i` | players currently touching region `<n>`, `<n>` = 0–3 **always** (regions the current split does not use report `0`), gated by `streams.region` |
 
 ## Axis conventions & caveats
 

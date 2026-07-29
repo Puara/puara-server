@@ -1,6 +1,8 @@
 // SharedState class descriptions — cf. https://soundworks.dev/api
 // Units and axis conventions are the OSC contract: see docs/NAMESPACE.md.
 
+import { SPLITS, DEFAULT_REGIONS } from './touch-layout.js';
+
 // One `player` state per connected phone, owned by the phone.
 export const playerDescription = {
   id: {
@@ -75,6 +77,16 @@ export const playerDescription = {
     type: 'any',
     default: null,
     nullable: true,
+  },
+  // Index of the touch-surface sub-area the primary pointer is in, per the
+  // layout authored on the dashboard (`touchSplit`/`touchRegions`). -1 when not
+  // touching. Mirrors `touch`, but as one integer instead of coordinates, so a
+  // piece can react to "which panel" without duplicating the region math.
+  region: {
+    type: 'integer',
+    default: -1,
+    min: -1,
+    max: 3,
   },
   // 0-1, -1 when the Battery API is unavailable (iOS Safari)
   battery: {
@@ -158,6 +170,10 @@ export const globalDescription = {
     default: true,
   },
   streamButton: {
+    type: 'boolean',
+    default: true,
+  },
+  streamRegion: {
     type: 'boolean',
     default: true,
   },
@@ -258,6 +274,28 @@ export const globalDescription = {
     default: 5,
     min: 1,
     max: 10,
+  },
+  // ## touch surface design — authored on the dashboard, live on every phone.
+  // See src/shared/touch-layout.js for the region ordering and geometry.
+  // How the surface is divided into sub-areas.
+  touchSplit: {
+    type: 'enum',
+    list: SPLITS,
+    default: 'single',
+  },
+  // Headline shown across the surface. Empty falls back to the built-in
+  // bilingual "Touchez l'écran / Touch the screen" — an operator who types
+  // their own text is on their own for translation.
+  touchText: {
+    type: 'string',
+    default: '',
+  },
+  // Always MAX_REGIONS entries of { label, color }; only the first
+  // `regionCount(touchSplit)` are shown. The tail is retained so switching
+  // splits back and forth does not lose the operator's colours.
+  touchRegions: {
+    type: 'any',
+    default: DEFAULT_REGIONS,
   },
   zones: {
     type: 'any',

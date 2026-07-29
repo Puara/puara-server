@@ -5,6 +5,7 @@ import { Client as OscClient } from 'node-osc';
 
 import { loadPuaraConfig } from '../shared/load-puara-config.js';
 import { NAMESPACE_VERSION, meta, device, zone, global as globalNs } from '../shared/namespace.js';
+import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -129,6 +130,10 @@ async function bootstrap() {
       enqueue(device.buttonPressTime(id), f(button.pressTime));
     }
 
+    if ('region' in updates && globalState.get('streamRegion')) {
+      enqueue(device.region(id), i(updates.region));
+    }
+
     // events always pass, whatever the mode — they are what scales
     if ('tap' in updates && updates.tap) {
       tapLog.push([Date.now(), player.get('zone')]);
@@ -157,6 +162,11 @@ async function bootstrap() {
     const zones = {};
     let globalEnergy = 0;
     let touchCount = 0;
+    // Always MAX_REGIONS wide, not `regionCount(split)`: a piece binds to a
+    // stable set of addresses, and the ones the current split retires have to
+    // be driven to 0 rather than left unsent — see the emit below.
+    const activeRegions = regionCount(globalState.get('touchSplit'));
+    const regionCounts = new Array(MAX_REGIONS).fill(0);
 
     // energy is derived from accel; with that stream off the states keep their
     // last value, so report 0 rather than a frozen number the piece would read
@@ -175,6 +185,13 @@ async function bootstrap() {
       if (player.get('touch') !== null) {
         touchCount += 1;
       }
+
+      // a stale index survives a split change until the phone next reports, so
+      // ignore anything outside the current geometry
+      const region = player.get('region');
+      if (region >= 0 && region < activeRegions) {
+        regionCounts[region] += 1;
+      }
     });
 
     for (const [, zoneName] of tapLog) {
@@ -192,6 +209,15 @@ async function bootstrap() {
     enqueue(globalNs.energy(), f(players.size ? globalEnergy / players.size : 0));
     enqueue(globalNs.taps(), f(tapLog.length / TAP_WINDOW));
     enqueue(globalNs.touchcount(), i(touchCount));
+
+    // Every region address, including the ones the current split does not use:
+    // narrowing quad -> columns must push regions 2 and 3 to 0, or a patch bound
+    // to them holds its last count forever and reads phantom fingers.
+    if (globalState.get('streamRegion')) {
+      regionCounts.forEach((count, n) => {
+        enqueue(globalNs.regionCount(n), i(count));
+      });
+    }
   }
 
   const tickInterval = 1000 / puara.bridgeTick;

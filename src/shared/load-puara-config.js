@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import YAML from 'yaml';
 
+import { DEFAULT_REGIONS, normalizeRegions } from './touch-layout.js';
+
 const DEFAULTS = {
   sensorRate: 100,
   bridgeTick: 30,
@@ -18,10 +20,18 @@ const DEFAULTS = {
     brush: true,
     rub: true,
     button: true,
+    region: true,
   },
   // '' → the server fills in its own LAN origin at startup
   publicAddress: '',
   maxTouches: 5,
+  // touch surface design; see src/shared/touch-layout.js
+  touch: {
+    split: 'single',
+    // '' → the built-in bilingual hint
+    text: '',
+    regions: DEFAULT_REGIONS,
+  },
   // puara-gestures constants; see src/shared/gestures.js
   gestures: {
     shakeThreshold: 0.5,
@@ -53,12 +63,16 @@ export function loadPuaraConfig(root = process.cwd()) {
   }
 
   const parsed = YAML.parse(fs.readFileSync(pathname, 'utf-8')) || {};
-  // `streams` and `gestures` are merged key by key: a partial block in the YAML
-  // (e.g. only `gyro: false`) must not drop the siblings to undefined.
+  // `streams`, `gestures` and `touch` are merged key by key: a partial block in
+  // the YAML (e.g. only `gyro: false`) must not drop the siblings to undefined.
+  const touch = { ...DEFAULTS.touch, ...(parsed.touch || {}) };
+
   return {
     ...DEFAULTS,
     ...parsed,
     streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
+    // hand-written YAML is the one place a malformed colour can enter
+    touch: { ...touch, regions: normalizeRegions(touch.regions) },
   };
 }
