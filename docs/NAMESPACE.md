@@ -1,4 +1,4 @@
-# OSC Namespace — `/puara/audience` (v0.3.0)
+# OSC Namespace — `/puara/audience` (v0.3.1)
 
 This document is the **contract** between the puara-bridge and everything
 downstream (ossia score, SpatGRIS, piece logic). The single source of truth in
@@ -16,7 +16,7 @@ Sent once at bridge startup, `connected` also on every join/leave.
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.3.0"` |
+| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.3.1"` |
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
@@ -60,6 +60,13 @@ are the scalable interaction primitives.
 
 `touch` stays single-point for compatibility; `touch/count` plus `touch/<n>` is
 the multi-touch view of the same frame. Both are gated by `streams.touch`.
+
+Touch coordinates are normalized against the **touch surface**, which stops
+above the player's tab bar, not against the whole viewport: `y = 1` is the
+bottom of the area the audience can actually touch. `region` is derived from the
+same coordinates, so a seam is where the phone draws it. (Before namespace
+0.3.1 the divisor was the viewport height, which biased `y` low by the height of
+the tab bar and moved every horizontal seam down by half of it.)
 
 ## Gesture descriptors — every `interactionMode`, not gated by `emitRaw`
 

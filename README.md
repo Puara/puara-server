@@ -220,6 +220,13 @@ of `config/puara.yaml`:
   languages, so write it bilingual.
 - **per-region label and colour** — one of each per sub-area. Keep colours dark:
   a few hundred bright phone screens light the dome from the seats.
+- **touch feedback** — on by default. A ring appears under each finger, and
+  brightens once the payload carrying that touch has actually left the phone, so
+  the confirmation means *you are in the show*, not merely *the glass registered
+  a press*: a phone with every stream switched off shows contact and never
+  brightens. The pressed region dims at the same time. Built to subtract light
+  rather than add it — hairline ring, region darker — but switch it off for a cue
+  that needs the seats completely dark.
 
 Regions are numbered left-to-right then top-to-bottom, and that index reaches
 OSC as `/puara/audience/<id>/region` (`-1` on release) plus a per-region audience
@@ -231,6 +238,13 @@ phones and the bridge in
 
 Audience members can check what their own phone is sending in the player's
 *Données / Data* tab.
+
+**Upgrading from namespace 0.3.0:** touch coordinates are now normalized against
+the touch surface rather than the viewport, so `y = 1` is the bottom of the area
+the audience can actually touch. Previously `y` was biased low by the height of
+the tab bar and horizontal seams sat half a tab bar below where the phone draws
+them. A patch that hard-codes a `y` threshold instead of reading `region` should
+be re-checked.
 
 ### QR code address
 
@@ -259,7 +273,7 @@ src/
     ├── strings.js            # FR/EN UI strings
     └── load-puara-config.js  # config/puara.yaml loader (node side)
 docs/
-├── NAMESPACE.md              # the OSC contract (versioned, currently 0.3.0)
+├── NAMESPACE.md              # the OSC contract (versioned, currently 0.3.1)
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots
 ```
