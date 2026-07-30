@@ -625,9 +625,16 @@ async function main($container) {
         </header>
         ${touchEnabled ? renderTouchSurface() : nothing}
         <main class="tab-${activeTab}">
-          ${activeTab === 'play'
-            ? html`<p class="status-message">${tt(statusKey)}</p>`
-            : renderDataPanel()
+          ${activeTab === 'data'
+            ? renderDataPanel()
+            : touchEnabled
+              // The surface covers this message completely, so rendering it puts
+              // text nobody can read behind an opaque overlay — except for the
+              // sliver a region seam exposes, which is how a stray glyph ended
+              // up in the middle of the screen. The surface carries its own
+              // headline (`touchHint`); this one is for when there is no surface.
+              ? nothing
+              : html`<p class="status-message">${tt(statusKey)}</p>`
           }
         </main>
         <nav class="tab-bar">
