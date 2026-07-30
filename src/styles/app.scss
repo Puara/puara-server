@@ -144,7 +144,12 @@ body.loading {
     // stops short of the tab bar, so the audience can always switch tabs
     bottom: 52px;
     z-index: 10;
-    background-color: transparent;
+    // Opaque, not transparent: the seams between regions are gaps in the grid,
+    // so a transparent surface makes them windows onto whatever the layout put
+    // underneath — which is how a couple of pixels of the status message showed
+    // up as a stray glyph mid-screen. The surface now supplies its own dark
+    // backdrop, and the seams read the same as before.
+    background-color: var(--sw-background-color);
   }
 
   // Painted behind the surface and non-interactive: every pointer event belongs
@@ -153,7 +158,7 @@ body.loading {
     position: absolute;
     inset: 0;
     display: grid;
-    // the 2px seams let the page background separate adjacent colours
+    // the 2px seams let the surface's dark backdrop separate adjacent colours
     gap: 2px;
     pointer-events: none;
   }
