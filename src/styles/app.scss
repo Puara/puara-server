@@ -165,6 +165,7 @@ body.loading {
     // a single region covering the whole screen reads as a flat wash, so keep
     // the colour but let the dark page show through at the edges
     overflow: hidden;
+    transition: filter 120ms ease-out;
 
     span {
       font-size: 2rem;
@@ -173,6 +174,61 @@ body.loading {
       // labels sit on operator-chosen colours; a shadow keeps them legible on
       // both a near-black and a near-white choice
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    }
+
+    // Touch feedback dims the pressed region instead of highlighting it: it
+    // reads as "pressed" either way, and this is the direction that takes light
+    // out of the dome rather than putting it in.
+    &.pressed {
+      filter: brightness(0.55);
+    }
+  }
+
+  // ## touch feedback — rings under the fingers, appended by the player client
+  // straight to the DOM. Above the coloured regions, still non-interactive: the
+  // pointer handlers must stay on .touch-surface alone.
+  .touch-marks {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .touch-mark {
+    position: absolute;
+    // left/top are set to the fingertip, so pull the ring back onto it here and
+    // leave transform free for the confirmation
+    width: 88px;
+    height: 88px;
+    margin: -44px 0 0 -44px;
+    border-radius: 50%;
+    // a hairline: hundreds of these are a light source inside the Satosphère
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    transition: opacity 200ms linear, transform 200ms ease-out,
+                border-color 200ms linear;
+
+    // set once the payload carrying this touch has actually left the phone —
+    // the difference between "the glass saw you" and "you are in the show"
+    &.sent {
+      border-color: rgba(255, 255, 255, 0.75);
+      transform: scale(1.12);
+    }
+
+    &.released {
+      opacity: 0;
+      transform: scale(1.4);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .touch-region,
+    .touch-mark {
+      transition: none;
+    }
+
+    .touch-mark.sent,
+    .touch-mark.released {
+      transform: none;
     }
   }
 

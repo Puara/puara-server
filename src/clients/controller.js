@@ -256,7 +256,9 @@ async function main($container) {
             Applies live to every connected phone. Regions are numbered
             left-to-right then top-to-bottom, and that index is what the bridge
             sends as <code>/puara/audience/&lt;id&gt;/region</code> — enable the
-            <code>region</code> stream above to emit it.
+            <code>region</code> stream above to emit it. Touch feedback (a ring
+            under the finger, the pressed region dimmed) happens on the phones
+            only; the preview below shows the design, not the interaction.
           </p>
           <div class="control-row">
             <sc-text>split</sc-text>
@@ -273,6 +275,13 @@ async function main($container) {
               value="${global.get('touchText')}"
               @change="${e => global.set({ touchText: e.detail.value })}"
             ></sc-text>
+          </div>
+          <div class="control-row">
+            <sc-text>touch feedback</sc-text>
+            <sc-toggle
+              ?active="${global.get('touchFeedback')}"
+              @change="${e => global.set({ touchFeedback: e.detail.value })}"
+            ></sc-toggle>
           </div>
           ${visibleRegions().map((region, index) => html`
             <div class="control-row">

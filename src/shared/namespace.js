@@ -1,12 +1,15 @@
 // Single source of truth for the OSC namespace — the contract lives in
 // docs/NAMESPACE.md and must match this file exactly.
 
+// 0.3.1 — `touch`/`touch/<n>`/`region` are normalized against the touch surface
+// instead of the viewport; y was biased low by the height of the tab bar and
+// horizontal seams sat half a tab bar below where the phone draws them.
 // 0.3.0 — touch surface sub-areas: per-device `region` and per-region audience
 // counts, driven by the layout authored on the dashboard.
 // 0.2.0 — `shake` changed from an event float to a continuous 3-axis energy
 // signal (puara-gestures semantics) and `jab` took over the old behaviour;
 // jab/brush/rub/button and multi-touch addresses added.
-export const NAMESPACE_VERSION = '0.3.0';
+export const NAMESPACE_VERSION = '0.3.1';
 
 const ROOT = '/puara/audience';
 

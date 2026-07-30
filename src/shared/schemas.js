@@ -297,6 +297,14 @@ export const globalDescription = {
     type: 'any',
     default: DEFAULT_REGIONS,
   },
+  // Whether a phone confirms a touch on screen (ring at the fingertip, pressed
+  // region dimmed). On by default — an audience with no confirmation cannot
+  // tell a working phone from a dead one — but an operator has to be able to
+  // kill it for a cue that needs the seats fully dark.
+  touchFeedback: {
+    type: 'boolean',
+    default: true,
+  },
   zones: {
     type: 'any',
     default: ['default'],

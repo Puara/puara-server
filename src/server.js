@@ -79,6 +79,7 @@ const global = await server.stateManager.create('global', {
   touchSplit: puara.touch.split,
   touchText: puara.touch.text,
   touchRegions: puara.touch.regions,
+  touchFeedback: puara.touch.feedback,
   ...puara.gestures,
   zones: puara.zones,
 });

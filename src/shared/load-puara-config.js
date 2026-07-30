@@ -31,6 +31,8 @@ const DEFAULTS = {
     // '' → the built-in bilingual hint
     text: '',
     regions: DEFAULT_REGIONS,
+    // on-screen confirmation that a touch was registered and sent
+    feedback: true,
   },
   // puara-gestures constants; see src/shared/gestures.js
   gestures: {

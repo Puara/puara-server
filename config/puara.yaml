@@ -76,6 +76,14 @@ touch:
     - { label: '', color: '#1b6b4a' }
     - { label: '', color: '#6b5a1b' }
 
+  # On-screen confirmation of a touch: a thin ring under the finger, brightening
+  # once the payload has actually left the phone, and the pressed region dimmed.
+  # Without it an audience member cannot tell a working phone from a dead one.
+  # Built to subtract light rather than add it — the ring is a hairline and the
+  # region gets darker, not brighter — but set this to false for a cue that
+  # needs the seats completely dark. Editable live from the dashboard.
+  feedback: true
+
 # puara-gestures descriptor constants (https://github.com/Puara/puara-gestures).
 # All editable live from the dashboard's "Gesture settings" panel; editing one
 # rebuilds that detector on every phone, resetting its accumulated state.
