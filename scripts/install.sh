@@ -146,6 +146,40 @@ else
   skip "phones will have no motion sensors over plain HTTP — desktop testing only"
 fi
 
+# ------------------------------------------------------- native addon
+# gesture-tester branch: the bridge runs the real C++ puara-gestures descriptors
+# through a Node addon compiled against a checkout of that library. Optional —
+# without it the audience system runs exactly as on main, and the bridge says so
+# at startup instead of failing.
+step "Building the puara-gestures addon"
+GESTURES_PATH="${PUARA_GESTURES_PATH:-$(cd "${REPO_ROOT}/.." && pwd)/puara-gestures}"
+
+if [ ! -f "${GESTURES_PATH}/include/puara/gestures.h" ]; then
+  warn "puara-gestures not found at ${GESTURES_PATH}"
+  skip "clone it beside this repo, or set PUARA_GESTURES_PATH, and rerun"
+  skip "the server still runs; there will be no /puara/gestures output"
+elif [ ! -f "${GESTURES_PATH}/3rdparty/IMU_Sensor_Fusion/imu_orientation.cpp" ]; then
+  warn "${GESTURES_PATH} is missing its 3rdparty submodule"
+  skip "run: git -C '${GESTURES_PATH}' submodule update --init --recursive"
+elif ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1; then
+  warn "no C++ compiler found — skipping the addon"
+  skip "install build-essential (or Xcode command line tools) and rerun"
+else
+  ok "puara-gestures at ${GESTURES_PATH}"
+  ok "on branch $(git -C "$GESTURES_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(not a git checkout)')"
+  # node-gyp downloads the matching node headers into ~/.cache/node-gyp on first
+  # use. Offline machines that carry system headers (a distro nodejs-dev) can be
+  # pointed at them instead, so try that before giving up.
+  if PUARA_GESTURES_PATH="$GESTURES_PATH" npx node-gyp rebuild --directory=native >/tmp/puara-addon-build.log 2>&1; then
+    ok "addon built"
+  elif PUARA_GESTURES_PATH="$GESTURES_PATH" npx node-gyp rebuild --directory=native --nodedir=/usr >>/tmp/puara-addon-build.log 2>&1; then
+    ok "addon built against system node headers"
+  else
+    warn "addon build failed — see /tmp/puara-addon-build.log"
+    skip "the server still runs, without the C++ descriptors"
+  fi
+fi
+
 # ---------------------------------------------------------------- build
 step "Building"
 npm run build
@@ -155,6 +189,7 @@ ok "build complete"
 step "Done"
 cat <<EOF
     Start the server:   ./scripts/start.sh
+    Watch the C++ descriptors: ./scripts/start.sh --dump  (or the dashboard)
     Desktop only:       ./scripts/start.sh --env default
 
 EOF

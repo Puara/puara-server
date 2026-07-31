@@ -4,6 +4,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 
 import { DEFAULT_REGIONS, normalizeRegions } from './touch-layout.js';
+import { NATIVE_PARAM_DEFAULTS } from './native-gestures.js';
 
 const DEFAULTS = {
   sensorRate: 100,
@@ -34,6 +35,8 @@ const DEFAULTS = {
     // on-screen confirmation that a touch was registered and sent
     feedback: true,
   },
+  // gesture-tester branch: constants for the C++ descriptors the bridge runs
+  nativeGestures: NATIVE_PARAM_DEFAULTS,
   // puara-gestures constants; see src/shared/gestures.js
   gestures: {
     shakeThreshold: 0.5,
@@ -74,6 +77,7 @@ export function loadPuaraConfig(root = process.cwd()) {
     ...parsed,
     streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
+    nativeGestures: { ...DEFAULTS.nativeGestures, ...(parsed.nativeGestures || {}) },
     // hand-written YAML is the one place a malformed colour can enter
     touch: { ...touch, regions: normalizeRegions(touch.regions) },
   };

@@ -309,6 +309,15 @@ export const globalDescription = {
     type: 'any',
     default: ['default'],
   },
+  // ## gesture-tester branch only
+  // Constants for the C++ puara-gestures descriptors the bridge runs, as one
+  // object rather than a field per constant: this is a test bench and the set
+  // changes whenever the library under test does. See NATIVE_PARAMS in
+  // src/shared/native-gestures.js for the keys and their ranges.
+  nativeParams: {
+    type: 'any',
+    default: {},
+  },
 };
 
 // Owned by the puara-bridge client; dashboard attaches for bridge health.
@@ -330,5 +339,28 @@ export const bridgeStatusDescription = {
   destinations: {
     type: 'any',
     default: [],
+  },
+};
+
+// ## gesture-tester branch only
+// Owned by the bridge, one state for the whole run: what the C++ descriptors are
+// reporting per player, so the dashboard can show them without an OSC monitor.
+// A single `any` blob rather than a field per descriptor — the shape follows
+// whatever the library under test exposes, and a schema would have to be
+// rewritten every time it grows.
+export const nativeGesturesDescription = {
+  // false when the addon is missing or failed to load; `reason` says which
+  available: {
+    type: 'boolean',
+    default: false,
+  },
+  reason: {
+    type: 'string',
+    default: '',
+  },
+  // { [playerId]: { descriptor: value, ... } }, refreshed at NATIVE_REPORT_RATE
+  values: {
+    type: 'any',
+    default: {},
   },
 };

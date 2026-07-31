@@ -108,6 +108,37 @@ gestures:
   buttonCountInterval: 200  # ms window for multi-tap
   buttonHoldInterval: 5000  # ms a press must last to count as a hold
 
+# ## gesture-tester branch only
+# Constants for the C++ puara-gestures descriptors the bridge runs. These are
+# separate from the `gestures` block above, which tunes the JS ports the phones
+# compute — both run at once so the two can be compared, and each has its own
+# constants. Every key here is editable live from the dashboard's
+# "puara-gestures constants (C++)" panel.
+#
+# Defaults are tuned for a phone reporting m/s^2 and deg/s, not for the ESP32
+# ranges the library ships with. Anything omitted falls back to the default in
+# src/shared/native-gestures.js.
+nativeGestures:
+  impactThreshold: 18          # m/s^2 of gravity-free acceleration to fire a strike
+  impactReleaseThreshold: 12
+  impactMinInterval: 120       # ms refractory between strikes
+  envelopeAttack: 0.5
+  envelopeRelease: 0.05
+  stillnessThreshold: 0.4      # activity at or below this counts as held still
+  stillnessSettleTime: 700     # ms of stillness before `settled` turns true
+  segmenterOnThreshold: 1.2    # activity that starts a movement phrase
+  segmenterOffThreshold: 0.6
+  freefallThreshold: 3         # total acceleration below this reads as weightless
+  spinDeadzone: 5              # deg/s treated as zero, so a resting phone stops accumulating
+  rhythmSmoothing: 0.5
+  rhythmTimeout: 3000          # ms without a tap before the beat estimate resets
+  ribbonTapMaxTime: 250
+  ribbonTapMaxTravel: 0.05
+  shakeThreshold: 0.1
+  jabThreshold: 5
+  buttonCountInterval: 200
+  buttonHoldInterval: 5000
+
 # Dome sections. Each zone gets its own QR code (player URL + ?zone=<name>).
 # A plain QR (no param) lands in "default".
 zones:

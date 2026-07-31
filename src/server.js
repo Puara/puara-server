@@ -7,7 +7,12 @@ import { loadConfig, configureHttpRouter } from '@soundworks/helpers/server.js';
 import ServerPluginCheckin from '@soundworks/plugin-checkin/server.js';
 import ServerPluginPlatformInit from '@soundworks/plugin-platform-init/server.js';
 
-import { playerDescription, globalDescription, bridgeStatusDescription } from './shared/schemas.js';
+import {
+  playerDescription,
+  globalDescription,
+  bridgeStatusDescription,
+  nativeGesturesDescription,
+} from './shared/schemas.js';
 import { loadPuaraConfig } from './shared/load-puara-config.js';
 
 // - General documentation: https://soundworks.dev/
@@ -36,6 +41,8 @@ server.pluginManager.register('checkin', ServerPluginCheckin, {
 server.stateManager.defineClass('player', playerDescription);
 server.stateManager.defineClass('global', globalDescription);
 server.stateManager.defineClass('bridge-status', bridgeStatusDescription);
+// gesture-tester branch: live readout of the C++ descriptors, owned by the bridge
+server.stateManager.defineClass('native-gestures', nativeGesturesDescription);
 
 await server.start();
 
@@ -81,6 +88,7 @@ const global = await server.stateManager.create('global', {
   touchRegions: puara.touch.regions,
   touchFeedback: puara.touch.feedback,
   ...puara.gestures,
+  nativeParams: puara.nativeGestures,
   zones: puara.zones,
 });
 

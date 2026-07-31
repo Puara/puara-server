@@ -6,6 +6,8 @@ import { Client as OscClient } from 'node-osc';
 import { loadPuaraConfig } from '../shared/load-puara-config.js';
 import { NAMESPACE_VERSION, meta, device, zone, global as globalNs } from '../shared/namespace.js';
 import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
+import { flatten, nativeAddress, NATIVE_ROOT } from '../shared/native-gestures.js';
+import { loadAddon } from '../shared/native-addon.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -220,9 +222,111 @@ async function bootstrap() {
     }
   }
 
+  // ## gesture-tester branch: the real C++ descriptors, in parallel
+  // One Bank per phone, fed the raw frame at the bridge tick. The JS ports the
+  // phones compute are untouched and still go out under `/puara/audience/...`;
+  // these land under `/puara/gestures/...` from the same input, so `oscdump`
+  // shows both implementations of a gesture side by side.
+  const { Bank, reason } = loadAddon();
+  const banks = new Map(); // player id -> Bank
+  // Last value sent per address, so an idle phone does not re-send identical
+  // numbers for ~60 addresses at every tick. Momentary flags bypass this.
+  const lastNative = new Map();
+  // Snapshot for the dashboard, published at NATIVE_REPORT_RATE rather than the
+  // tick: it is a readout for a human, not a signal path.
+  const NATIVE_REPORT_RATE = 10; // Hz
+  let nativeSnapshot = {};
+
+  const nativeGestures = await client.stateManager.create('native-gestures', {
+    available: Bank !== null,
+    reason: reason || '',
+  });
+
+  if (Bank === null) {
+    console.log(`> puara-gestures addon unavailable: ${reason}`);
+    console.log('  the audience system runs as usual; no /puara/gestures output');
+  } else {
+    console.log(`> puara-gestures addon loaded — C++ descriptors on ${NATIVE_ROOT}/<id>/...`);
+  }
+
+  function bankFor(id) {
+    let bank = banks.get(id);
+    if (bank === undefined) {
+      bank = new Bank(globalState.get('nativeParams'));
+      banks.set(id, bank);
+    }
+    return bank;
+  }
+
+  players.onDetach(player => {
+    // the descriptors carry accumulated state; a rejoining phone starts clean
+    const id = player.get('id');
+    banks.delete(id);
+    delete nativeSnapshot[id];
+    for (const key of [...lastNative.keys()]) {
+      if (key.startsWith(`${id}/`)) {
+        lastNative.delete(key);
+      }
+    }
+  });
+
+  // Retuning a constant rebuilds nothing — the C++ objects take it live, which
+  // is the whole reason the params are a single state object.
+  globalState.onUpdate(updates => {
+    if ('nativeParams' in updates) {
+      for (const bank of banks.values()) {
+        bank.setParams(updates.nativeParams);
+      }
+    }
+  });
+
+  function runNativeGestures() {
+    if (Bank === null) {
+      return;
+    }
+
+    players.forEach(player => {
+      const id = player.get('id');
+      const outputs = bankFor(id).update({
+        accel: player.get('accel'),
+        gyro: player.get('gyro'),
+        touches: player.get('touches'),
+      });
+
+      nativeSnapshot[id] = outputs;
+
+      for (const { address, values, type, momentary } of flatten(outputs)) {
+        const cacheKey = `${id}/${address}`;
+
+        if (momentary) {
+          // fires once per event; the zero frames in between say nothing
+          if (values[0]) {
+            enqueue(nativeAddress(id, address), i(1));
+          }
+          continue;
+        }
+
+        const serialized = values.join(',');
+        if (lastNative.get(cacheKey) === serialized) {
+          continue;
+        }
+        lastNative.set(cacheKey, serialized);
+
+        const cast = type === 'integer' ? i : f;
+        enqueue(nativeAddress(id, address), ...values.map(cast));
+      }
+    });
+  }
+
+  setInterval(() => {
+    nativeGestures.set({ values: nativeSnapshot });
+    nativeSnapshot = {};
+  }, 1000 / NATIVE_REPORT_RATE);
+
   const tickInterval = 1000 / puara.bridgeTick;
   setInterval(() => {
     computeAggregates();
+    runNativeGestures();
     flush();
   }, tickInterval);
 

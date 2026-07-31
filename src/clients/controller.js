@@ -20,6 +20,7 @@ import {
   normalizeRegions,
   regionCount,
 } from '../shared/touch-layout.js';
+import { NATIVE_PARAMS, NATIVE_ROOT } from '../shared/native-gestures.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -68,6 +69,24 @@ async function main($container) {
     bridgeStatus = null; renderApp(); 
   });
   bridgeStatus = bridgeCollection.size > 0 ? bridgeCollection.map(s => s)[0] : null;
+
+  // gesture-tester branch: the C++ descriptor readout, owned by the bridge
+  let nativeGestures = null;
+  const nativeCollection = await client.stateManager.getCollection('native-gestures');
+  nativeCollection.onAttach(state => {
+    nativeGestures = state; renderApp();
+  });
+  nativeCollection.onDetach(() => {
+    nativeGestures = null; renderApp();
+  });
+  nativeGestures = nativeCollection.size > 0 ? nativeCollection.map(s => s)[0] : null;
+  // The values move at the bridge's report rate; repaint on a timer rather than
+  // on every update, as the meters already do.
+  setInterval(() => {
+    if (nativeGestures !== null) {
+      renderApp();
+    }
+  }, METER_REFRESH);
 
   // join/leave events within the last RATE_WINDOW seconds
   const joinLog = [];
@@ -151,6 +170,74 @@ async function main($container) {
         </div>
         <p class="touch-preview-hint">${text || tt('touchHint')}</p>
       </div>`;
+  }
+
+  // ## gesture-tester branch: C++ descriptor readout
+  // Formats whatever the addon reported, without a table of expected keys — the
+  // set follows the library under test, and a missing entry here would quietly
+  // hide a new descriptor.
+  function formatNative(value) {
+    if (Array.isArray(value)) {
+      return value.map(v => (typeof v === 'number' ? v.toFixed(3) : String(v))).join('  ');
+    }
+    if (typeof value === 'number') {
+      return value.toFixed(3);
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'true' : '—';
+    }
+    return String(value);
+  }
+
+  // One row per leaf, addressed the way the bridge emits it, so a value read here
+  // can be grepped straight out of `oscdump`.
+  function nativeRows(outputs, prefix = []) {
+    const rows = [];
+    for (const [key, value] of Object.entries(outputs)) {
+      const trail = [...prefix, key];
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        rows.push(...nativeRows(value, trail));
+      } else {
+        rows.push({ address: trail.join('/'), value });
+      }
+    }
+    return rows;
+  }
+
+  function renderNativePanel() {
+    const state = nativeGestures ? nativeGestures.getValues() : null;
+
+    if (state === null) {
+      return html`<p class="error">bridge offline — no descriptor readout</p>`;
+    }
+    if (!state.available) {
+      return html`
+        <p class="error">addon unavailable</p>
+        <p class="hint">${state.reason}</p>`;
+    }
+
+    const entries = Object.entries(state.values);
+    if (entries.length === 0) {
+      return html`<p class="hint">no phones connected — join one to see the descriptors move</p>`;
+    }
+
+    return html`
+      ${entries.map(([id, outputs]) => html`
+        <div class="native-device">
+          <h3>#${id} <span class="hint">${NATIVE_ROOT}/${id}/…</span></h3>
+          <ul class="data-rows">
+            ${nativeRows(outputs).map(row => html`
+              <li class="data-row">
+                <span class="data-label">${row.address}</span>
+                <span class="data-value">${formatNative(row.value)}</span>
+              </li>`)}
+          </ul>
+        </div>`)}`;
+  }
+
+  function setNativeParam(key, value) {
+    // one `any` object, so every write is a read-modify-write of the whole thing
+    global.set({ nativeParams: { ...global.get('nativeParams'), [key]: value } });
   }
 
   function renderApp() {
@@ -327,6 +414,37 @@ async function main($container) {
               <p>destinations: ${bridge.destinations.map(d => `${d.host}:${d.port}`).join(', ')}</p>`
             : html`<p class="error">bridge offline</p>`
           }
+        </section>
+
+        <section class="panel native-panel">
+          <h2>puara-gestures (C++)</h2>
+          <p class="hint">
+            The real library, running in the bridge on the raw streams from each
+            phone, emitted under <code>${NATIVE_ROOT}/&lt;id&gt;/…</code>. The JS
+            ports the phones compute still go out under
+            <code>/puara/audience/…</code> — same gesture, both implementations,
+            so they can be compared.
+          </p>
+          ${renderNativePanel()}
+        </section>
+
+        <section class="panel">
+          <h2>puara-gestures constants (C++)</h2>
+          <p class="hint">
+            Applied live to every phone's descriptor bank. These do not touch the
+            JS ports in the <em>Gesture settings</em> panel above.
+          </p>
+          ${NATIVE_PARAMS.map(({ key, label, min, max, step }) => html`
+            <div class="control-row">
+              <sc-text>${label}</sc-text>
+              <sc-number
+                min="${min}"
+                max="${max}"
+                step="${step}"
+                value="${global.get('nativeParams')[key]}"
+                @change="${e => setNativeParam(key, e.detail.value)}"
+              ></sc-number>
+            </div>`)}
         </section>
 
         <section class="panel clients-panel">

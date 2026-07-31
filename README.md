@@ -1,4 +1,15 @@
-# puara-server
+# puara-server — `gesture-tester` branch
+
+> **This is not `main`.** This branch is a permanent test bench for
+> [puara-gestures](https://github.com/Puara/puara-gestures): the bridge runs the
+> real C++ descriptors, compiled from a checkout of that library, alongside the JS
+> ports the phones compute — same input, both implementations, emitted under
+> `/puara/gestures/…` and `/puara/audience/…` so they can be compared. It carries
+> a native build step and a dependency on a sibling repository, which is why it
+> stays off `main`. See **[docs/GESTURE-TESTER.md](docs/GESTURE-TESTER.md)**.
+>
+> Everything below describes the audience system, which behaves here exactly as it
+> does on `main`.
 
 Browser-based audience interaction system for the
 [Satosphère](https://sat.qc.ca/) — the SAT's 18 m immersive dome.
@@ -276,8 +287,13 @@ src/
     ├── namespace.js          # OSC namespace builder (single source of truth)
     ├── strings.js            # FR/EN UI strings
     └── load-puara-config.js  # config/puara.yaml loader (node side)
+native/                       # gesture-tester branch: the puara-gestures addon
+├── binding.gyp               # C++20 build against a puara-gestures checkout
+├── gestures-path.cjs         # where that checkout is
+└── src/puara_addon.cpp       # one descriptor bank per phone
 docs/
 ├── NAMESPACE.md              # the OSC contract (versioned, currently 0.3.1)
+├── GESTURE-TESTER.md         # this branch: running the C++ library live
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots
 ```
