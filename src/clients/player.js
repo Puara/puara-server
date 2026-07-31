@@ -309,29 +309,36 @@ async function main($container) {
   }
 
   // Cached because `pointerPosition` reads it on every pointermove and a layout
-  // read there is the one place this file can stall the frame. Invalidated
-  // whenever the viewport changes or the surface is (re)mounted by a render.
-  let surfaceRect = null;
+  // read there is the one place this file can stall the frame. Keyed by element,
+  // since the full-screen surface and the Data tab's pad are both valid targets
+  // and each normalizes against its own box. Invalidated whenever the viewport
+  // changes or a render (re)mounts the element.
+  let cachedTarget = null;
+  let cachedRect = null;
 
   function surfaceGeometry(target) {
-    if (surfaceRect === null) {
-      surfaceRect = target.getBoundingClientRect();
+    if (cachedRect === null || cachedTarget !== target) {
+      cachedTarget = target;
+      cachedRect = target.getBoundingClientRect();
     }
-    return surfaceRect;
+    return cachedRect;
   }
 
-  window.addEventListener('resize', () => {
-    surfaceRect = null;
-  });
-  window.addEventListener('orientationchange', () => {
-    surfaceRect = null;
-  });
+  function invalidateGeometry() {
+    cachedTarget = null;
+    cachedRect = null;
+  }
 
-  // Normalized against the touch surface, not the viewport. The surface stops
-  // above the tab bar, so viewport-relative coordinates put the seam of a `quad`
-  // half a tab bar away from where the audience sees it — tolerable while
-  // nothing on screen reacted to a touch, wrong now that the pressed region
-  // lights up and would disagree with the `region` the phone reports.
+  window.addEventListener('resize', invalidateGeometry);
+  window.addEventListener('orientationchange', invalidateGeometry);
+  // The Data tab scrolls, which moves the pad without resizing anything.
+  window.addEventListener('scroll', invalidateGeometry, true);
+
+  // Normalized against the element the pointer landed on, not the viewport. The
+  // surface stops above the tab bar, so viewport-relative coordinates put the
+  // seam of a `quad` half a tab bar away from where the audience sees it —
+  // tolerable while nothing on screen reacted to a touch, wrong now that the
+  // pressed region lights up and would disagree with the reported `region`.
   function pointerPosition(e) {
     const rect = surfaceGeometry(e.currentTarget);
     // A zero-area rect would divide to NaN and put NaN on the wire, which is
@@ -546,8 +553,42 @@ async function main($container) {
               </li>`;
           })}
         </ul>
-        <p class="data-note">${tt('dataTouchNote')}</p>
+        ${running
+          // Only while the show is running: `tick()` is gated on it, so a pad
+          // offered here while paused would register touches the phone never
+          // sends. The `dataPaused` warning above already says so.
+          ? html`
+            <p class="data-note">${tt('dataTouchPad')}</p>
+            ${renderDataTouchpad()}`
+          : nothing
+        }
       </section>`;
+  }
+
+  // The painted sub-areas, shared by the full-screen surface and the Data tab's
+  // touchpad. One renderer on purpose: the pad exists to show what the surface
+  // sends, which it can only do honestly if both lay their regions out
+  // identically. `highlight` is the pressed-region dim, which the surface gates
+  // on `touchFeedback` and the pad does not — the pad *is* an inspection view,
+  // and a dim subtracts light from the dome rather than adding it.
+  function renderRegionGrid(split, highlight) {
+    const { cols, rows } = gridGeometry(split);
+    const regions = normalizeRegions(global.get('touchRegions'))
+      .slice(0, regionCount(split));
+
+    return html`
+      <div class="touch-regions"
+        style="grid-template-columns: repeat(${cols}, 1fr);
+               grid-template-rows: repeat(${rows}, 1fr);"
+      >
+        ${regions.map((region, index) => html`
+          <div
+            class="touch-region ${highlight && index === pressedRegion ? 'pressed' : ''}"
+            style="background-color: ${region.color}"
+          >
+            ${region.label ? html`<span>${region.label}</span>` : nothing}
+          </div>`)}
+      </div>`;
   }
 
   // The surface the audience actually touches, as designed on the dashboard.
@@ -555,12 +596,7 @@ async function main($container) {
   // `pointer-events: none`, so the pointer handlers stay on the one parent
   // element and multi-touch tracking does not have to be split per cell.
   function renderTouchSurface() {
-    const split = global.get('touchSplit');
-    const { cols, rows } = gridGeometry(split);
-    const regions = normalizeRegions(global.get('touchRegions'))
-      .slice(0, regionCount(split));
     const text = global.get('touchText').trim();
-    const feedback = global.get('touchFeedback');
 
     return html`
       <div class="touch-surface"
@@ -569,45 +605,55 @@ async function main($container) {
         @pointerup="${onPointerUp}"
         @pointercancel="${onPointerUp}"
       >
-        <div class="touch-regions"
-          style="grid-template-columns: repeat(${cols}, 1fr);
-                 grid-template-rows: repeat(${rows}, 1fr);"
-        >
-          ${regions.map((region, index) => html`
-            <div
-              class="touch-region ${feedback && index === pressedRegion ? 'pressed' : ''}"
-              style="background-color: ${region.color}"
-            >
-              ${region.label ? html`<span>${region.label}</span>` : nothing}
-            </div>`)}
-        </div>
+        ${renderRegionGrid(global.get('touchSplit'), global.get('touchFeedback'))}
         <div class="touch-marks"></div>
         <p class="touch-hint">${text || tt('touchHint')}</p>
       </div>`;
   }
 
-  // Whether the surface was on screen at the last render, so its teardown can be
-  // noticed: switching to the Data tab or a panic mid-touch removes the element
-  // without a pointerup, which would otherwise leave the phone reporting a
-  // finger it can no longer see.
-  let touchWasEnabled = false;
+  // A miniature of the surface at the foot of the Data tab, so the values above
+  // can be watched while something is actually touching. The same handlers, so
+  // this sends for real — that is the point: what the rows show is what left the
+  // phone, whichever surface produced it. Coordinates normalize to whichever
+  // element the pointer landed on, so a corner of the pad reads as that corner
+  // of the full surface and `region` agrees with the cell under the finger.
+  function renderDataTouchpad() {
+    return html`
+      <div class="data-touchpad"
+        @pointerdown="${onPointerDown}"
+        @pointermove="${onPointerMove}"
+        @pointerup="${onPointerUp}"
+        @pointercancel="${onPointerUp}"
+      >
+        ${renderRegionGrid(global.get('touchSplit'), true)}
+      </div>`;
+  }
+
+  // Which element is taking touches, so a swap can be noticed: changing tab or a
+  // panic mid-touch removes the element without a pointerup, which would
+  // otherwise leave the phone reporting a finger it can no longer see. Both tabs
+  // accept touches now — the Play tab through the full surface, the Data tab
+  // through its pad — so this tracks which one rather than whether.
+  let lastTouchTarget = 'none';
 
   function renderApp() {
     const running = global.get('running');
     const scene = global.get('scene');
     // the surface is needed in every mode: tap is an event, emitted always
     const touchEnabled = running && activeTab === 'play';
+    let touchTarget = 'none';
+    if (running) {
+      touchTarget = activeTab === 'play' ? 'surface' : 'pad';
+    }
 
-    if (touchWasEnabled && !touchEnabled) {
+    if (touchTarget !== lastTouchTarget) {
       pointers.clear();
       clearMarks();
       pressedRegion = -1;
+      // whatever the pointers were measured against is gone or replaced
+      invalidateGeometry();
+      lastTouchTarget = touchTarget;
     }
-    if (touchEnabled !== touchWasEnabled) {
-      // the surface is being mounted or torn down; any cached geometry is stale
-      surfaceRect = null;
-    }
-    touchWasEnabled = touchEnabled;
 
     let statusKey = 'waiting';
     if (running) {

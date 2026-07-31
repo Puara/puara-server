@@ -237,7 +237,11 @@ phones and the bridge in
 [`src/shared/touch-layout.js`](src/shared/touch-layout.js).
 
 Audience members can check what their own phone is sending in the player's
-*Données / Data* tab.
+*Données / Data* tab, which ends in a miniature of the surface — same split,
+same colours, same region indices. Touching it feeds the real handlers, so the
+values above it move while a finger is on it, which is the only way to watch
+`touch`, `brush`/`rub`, `button` and `region` respond to a known gesture. It
+sends for real, and it is only offered while the show is running.
 
 **Upgrading from namespace 0.3.0:** touch coordinates are now normalized against
 the touch surface rather than the viewport, so `y = 1` is the bottom of the area

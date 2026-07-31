@@ -91,7 +91,11 @@ body.loading {
   flex-grow: 1;
   position: relative;
   min-height: 100vh;
-  touch-action: none;
+  // `touch-action` is deliberately NOT set here. An ancestor's `none` cannot be
+  // relaxed further down, so declaring it on the layout made the Data tab
+  // unscrollable on a phone — which matters now that the tab has content below
+  // the fold. It is declared instead on the two elements that consume raw
+  // gestures: .touch-surface and .data-touchpad.
   user-select: none;
   -webkit-user-select: none;
 
@@ -144,6 +148,9 @@ body.loading {
     // stops short of the tab bar, so the audience can always switch tabs
     bottom: 52px;
     z-index: 10;
+    // every finger reaches the pointer handlers instead of the second one
+    // becoming a pinch-zoom
+    touch-action: none;
     // Opaque, not transparent: the seams between regions are gaps in the grid,
     // so a transparent surface makes them windows onto whatever the layout put
     // underneath — which is how a couple of pixels of the status message showed
@@ -349,6 +356,27 @@ body.loading {
     color: var(--sw-light-font-color);
     opacity: 0.6;
     margin: 12px 0 0;
+  }
+
+  // Miniature of the touch surface at the foot of the Data tab, so the rows can
+  // be read while a finger is on something. Short enough to leave the values in
+  // view on a phone, and `touch-action: none` so dragging across it feeds the
+  // pointer handlers instead of scrolling the panel out from under the finger.
+  .data-touchpad {
+    position: relative;
+    height: 22vh;
+    min-height: 110px;
+    max-height: 200px;
+    margin: 8px 0 0;
+    overflow: hidden;
+    touch-action: none;
+    border: 1px solid var(--sw-lighter-background-color);
+
+    // the labels are sized for a full screen; this is a fraction of one
+    .touch-region span {
+      font-size: 1.2rem;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    }
   }
 }
 

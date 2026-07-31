@@ -15,9 +15,9 @@ export const strings = {
   dataRate: { fr: 'Envois/s', en: 'Sends/s' },
   dataBattery: { fr: 'Batterie', en: 'Battery' },
   dataPaused: { fr: 'Rien n’est envoyé pour le moment', en: 'Nothing is being sent right now' },
-  dataTouchNote: {
-    fr: 'Le toucher se fait dans l’onglet Jouer',
-    en: 'Touch happens in the Play tab',
+  dataTouchPad: {
+    fr: 'Touchez la zone ci-dessous — elle envoie comme l’onglet Jouer',
+    en: 'Touch the area below — it sends just like the Play tab',
   },
 };
 
