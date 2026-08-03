@@ -6,7 +6,9 @@ parallel branch**, not a candidate for `main`: it carries a native build step an
 a dependency on a checkout of another repository, neither of which belongs in the
 audience system a show runs on.
 
-Currently pointed at the `combined-descriptors` branch of puara-gestures.
+Which library code is under test is whatever branch your puara-gestures checkout
+is on. To test unmerged work, build a branch from the PRs you want with
+[`scripts/combine-gestures-prs.sh`](./COMBINE-GESTURES-PRS.md).
 
 ## What it does
 
@@ -52,7 +54,6 @@ than it would on a device. Compare shapes and values, not latency.
 
 ```sh
 git clone --recursive https://github.com/Puara/puara-gestures ../puara-gestures
-git -C ../puara-gestures switch combined-descriptors
 
 ./scripts/install.sh     # builds the addon as one of its steps
 ./scripts/start.sh       # server + bridge, as usual
@@ -61,6 +62,17 @@ git -C ../puara-gestures switch combined-descriptors
 
 `install.sh` looks for puara-gestures **beside this repo**. Point it elsewhere
 with `PUARA_GESTURES_PATH=/path/to/clone ./scripts/install.sh`.
+
+To test unmerged library work instead of whatever `main` holds, assemble a branch
+from the PRs you care about — this also clones the checkout if it is missing, so
+it can replace the `git clone` above:
+
+```sh
+./scripts/combine-gestures-prs.sh --all --exclude 135 --build
+./scripts/combine-gestures-prs.sh 118 121 134 --build   # or just these
+```
+
+See [COMBINE-GESTURES-PRS.md](./COMBINE-GESTURES-PRS.md).
 
 The addon is optional. Without it — no checkout, no compiler, missing submodule —
 every step above still works, the audience system behaves exactly as on `main`,
@@ -162,6 +174,7 @@ branch:
 
 | path | role |
 |---|---|
+| `scripts/combine-gestures-prs.sh` | builds a library branch from chosen PRs ([docs](./COMBINE-GESTURES-PRS.md)) |
 | `native/binding.gyp` | addon build, C++20, includes from the puara-gestures checkout |
 | `native/gestures-path.cjs` | resolves that checkout; CommonJS because gyp shells out to `node -p` |
 | `native/src/puara_addon.cpp` | one `Bank` per phone: raw frame in, every descriptor out |
