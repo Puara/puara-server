@@ -71,6 +71,7 @@ const global = await server.stateManager.create('global', {
   sensorRate: puara.sensorRate,
   interactionMode: puara.interactionMode,
   emitRaw: puara.emitRaw,
+  timestamps: puara.timestamps,
   streamAccel: puara.streams.accel,
   streamGyro: puara.streams.gyro,
   streamOrientation: puara.streams.orientation,

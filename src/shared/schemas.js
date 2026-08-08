@@ -2,6 +2,7 @@
 // Units and axis conventions are the OSC contract: see docs/NAMESPACE.md.
 
 import { SPLITS, DEFAULT_REGIONS } from './touch-layout.js';
+import { TIMESTAMP_LEVELS } from './namespace.js';
 
 // One `player` state per connected phone, owned by the phone.
 export const playerDescription = {
@@ -132,6 +133,18 @@ export const globalDescription = {
   emitRaw: {
     type: 'boolean',
     default: true,
+  },
+  // Append a per-sample sequence number and sample time to every per-device
+  // message, for gesture-design sessions recorded with puara-creator.
+  //   off    — nothing appended; what a show runs
+  //   bridge — the bridge stamps at enqueue, which recovers the bridgeTick grid
+  // Off by default: it lengthens every /puara/audience/<id>/... message, so a
+  // consumer that reads a fixed argument count breaks. Bridge-side only; the
+  // phones are unaware of it.
+  timestamps: {
+    type: 'enum',
+    list: TIMESTAMP_LEVELS,
+    default: 'off',
   },
   // Per-stream enable. Read by BOTH the player (skips the field in its state
   // update, so nothing crosses the WiFi) and the bridge (skips the OSC

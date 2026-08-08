@@ -47,8 +47,52 @@ async function bootstrap() {
   let sentCount = 0;
   let lastSend = 0;
 
+  // Aggregates, meta and anything else that is not a per-device sample. These
+  // are computed at the tick and have no sample time to report, so they are
+  // never stamped — per-device messages go through enqueueDevice() below.
   function enqueue(address, ...args) {
     queue.push([address, ...args]);
+  }
+
+  // ## sample timestamps, under the `timestamps` toggle (namespace 0.4.0)
+  //
+  // Stamped here, at enqueue, and deliberately not in flush(): the queue is
+  // drained by the bridgeTick timer, so a flush-time stamp would hand every
+  // message in a tick the same time and quantise sample times onto a 33 ms
+  // grid — which is the whole error this exists to remove.
+  //
+  // The clock is monotonic and its epoch is the bridge's own start, not the
+  // wall clock: NTP can step the wall clock backwards mid-session, and a
+  // recorder differencing these would read a negative interval as real.
+  // Counters are never cleared, including when a phone leaves: they are keyed
+  // by address, ids are reused, and a reconnecting phone whose counter restarts
+  // would look to a recorder like a large reordering rather than an absence.
+  // `/status 0` and `/status 1` already bracket the gap. Growth is bounded by
+  // the id space, a few thousand entries at maxClients.
+  const timeOrigin = process.hrtime.bigint();
+  const SEQ_WRAP = 2 ** 31;
+  const deviceSeq = new Map(); // per-device address -> next sequence number
+
+  // The time is split across two 32-bit integers rather than sent as a 64-bit
+  // `h`, because node-osc cannot encode one: lib/osc.mjs handles i f s b m N
+  // only, and its `d` silently narrows to float32. Whole seconds plus
+  // microseconds within the second is exact, and it does not wrap.
+  function enqueueDevice(address, ...args) {
+    if (globalState.get('timestamps') === 'off') {
+      enqueue(address, ...args);
+      return;
+    }
+    const seq = deviceSeq.get(address) ?? 0;
+    deviceSeq.set(address, (seq + 1) % SEQ_WRAP);
+
+    const elapsed = (process.hrtime.bigint() - timeOrigin) / 1000n; // ns -> us
+    enqueue(
+      address,
+      ...args,
+      i(seq),
+      i(Number(elapsed / 1000000n)),
+      i(Number(elapsed % 1000000n)),
+    );
   }
 
   function flush() {
@@ -78,22 +122,22 @@ async function bootstrap() {
     // fed from elsewhere and updates in flight when a toggle flips.
     if (emitRaw) {
       if ('accel' in updates && globalState.get('streamAccel')) {
-        enqueue(device.accel(id), ...updates.accel.map(f));
+        enqueueDevice(device.accel(id), ...updates.accel.map(f));
       }
       if ('gyro' in updates && globalState.get('streamGyro')) {
-        enqueue(device.gyro(id), ...updates.gyro.map(f));
+        enqueueDevice(device.gyro(id), ...updates.gyro.map(f));
       }
       if ('orientation' in updates && globalState.get('streamOrientation')) {
-        enqueue(device.orientation(id), ...updates.orientation.map(f));
+        enqueueDevice(device.orientation(id), ...updates.orientation.map(f));
       }
       if ('touch' in updates && updates.touch !== null && globalState.get('streamTouch')) {
-        enqueue(device.touch(id), ...updates.touch.map(f));
+        enqueueDevice(device.touch(id), ...updates.touch.map(f));
       }
       // multi-touch: count always, then one address per pointer
       if ('touches' in updates && globalState.get('streamTouch')) {
-        enqueue(device.touchCount(id), i(updates.touches.length));
+        enqueueDevice(device.touchCount(id), i(updates.touches.length));
         updates.touches.forEach((point, n) => {
-          enqueue(device.touchPoint(id, n), ...point.map(f));
+          enqueueDevice(device.touchPoint(id, n), ...point.map(f));
         });
       }
     }
@@ -102,55 +146,55 @@ async function bootstrap() {
     // `emitRaw` does not gate these: they are already the cheap, scalable
     // representation raw streams get switched off in favour of.
     if ('shake' in updates && globalState.get('streamShake')) {
-      enqueue(device.shake(id), ...updates.shake.map(f));
+      enqueueDevice(device.shake(id), ...updates.shake.map(f));
     }
     if ('jab' in updates && globalState.get('streamJab')) {
-      enqueue(device.jab(id), ...updates.jab.map(f));
+      enqueueDevice(device.jab(id), ...updates.jab.map(f));
     }
     if ('brush' in updates && globalState.get('streamBrush')) {
-      enqueue(device.brush(id), ...updates.brush.map(f));
+      enqueueDevice(device.brush(id), ...updates.brush.map(f));
     }
     if ('rub' in updates && globalState.get('streamRub')) {
-      enqueue(device.rub(id), ...updates.rub.map(f));
+      enqueueDevice(device.rub(id), ...updates.rub.map(f));
     }
     if ('button' in updates && updates.button !== null && globalState.get('streamButton')) {
       const button = updates.button;
       // tap/dtap/ttap are high for a single tick — emit them as bangs rather
       // than streaming the zeros in between
       if (button.tap) {
-        enqueue(device.buttonTap(id), i(1));
+        enqueueDevice(device.buttonTap(id), i(1));
       }
       if (button.dtap) {
-        enqueue(device.buttonDtap(id), i(1));
+        enqueueDevice(device.buttonDtap(id), i(1));
       }
       if (button.ttap) {
-        enqueue(device.buttonTtap(id), i(1));
+        enqueueDevice(device.buttonTtap(id), i(1));
       }
-      enqueue(device.buttonCount(id), i(button.count));
-      enqueue(device.buttonPress(id), i(button.press ? 1 : 0));
-      enqueue(device.buttonHold(id), i(button.hold ? 1 : 0));
-      enqueue(device.buttonPressTime(id), f(button.pressTime));
+      enqueueDevice(device.buttonCount(id), i(button.count));
+      enqueueDevice(device.buttonPress(id), i(button.press ? 1 : 0));
+      enqueueDevice(device.buttonHold(id), i(button.hold ? 1 : 0));
+      enqueueDevice(device.buttonPressTime(id), f(button.pressTime));
     }
 
     if ('region' in updates && globalState.get('streamRegion')) {
-      enqueue(device.region(id), i(updates.region));
+      enqueueDevice(device.region(id), i(updates.region));
     }
 
     // events always pass, whatever the mode — they are what scales
     if ('tap' in updates && updates.tap) {
       tapLog.push([Date.now(), player.get('zone')]);
-      enqueue(device.tap(id), i(1));
+      enqueueDevice(device.tap(id), i(1));
     }
     // shake is no longer an event: it is emitted as continuous 3-axis energy in
     // the descriptor block above.
   });
 
   players.onAttach(player => {
-    enqueue(device.status(player.get('id')), i(1));
+    enqueueDevice(device.status(player.get('id')), i(1));
     enqueue(meta.connected(), i(players.size));
   });
   players.onDetach(player => {
-    enqueue(device.status(player.get('id')), i(0));
+    enqueueDevice(device.status(player.get('id')), i(0));
     enqueue(meta.connected(), i(players.size));
   });
 
@@ -301,7 +345,7 @@ async function bootstrap() {
         if (momentary) {
           // fires once per event; the zero frames in between say nothing
           if (values[0]) {
-            enqueue(nativeAddress(id, address), i(1));
+            enqueueDevice(nativeAddress(id, address), i(1));
           }
           continue;
         }
@@ -313,7 +357,7 @@ async function bootstrap() {
         lastNative.set(cacheKey, serialized);
 
         const cast = type === 'integer' ? i : f;
-        enqueue(nativeAddress(id, address), ...values.map(cast));
+        enqueueDevice(nativeAddress(id, address), ...values.map(cast));
       }
     });
   }
@@ -341,6 +385,15 @@ async function bootstrap() {
   enqueue(meta.connected(), i(players.size));
 
   console.log(`> puara-bridge online — namespace v${NAMESPACE_VERSION}, tick ${puara.bridgeTick} Hz`);
+  console.log(`  timestamps: ${globalState.get('timestamps')}`);
+
+  // A toggle that changes the shape of every per-device message should say so
+  // in the log the operator is already watching, not only on the dashboard.
+  globalState.onUpdate(updates => {
+    if ('timestamps' in updates) {
+      console.log(`> timestamps: ${updates.timestamps}`);
+    }
+  });
 }
 
 // The launcher allows to launch multiple clients in the same terminal window

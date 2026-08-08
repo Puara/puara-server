@@ -292,7 +292,7 @@ native/                       # gesture-tester branch: the puara-gestures addon
 ├── gestures-path.cjs         # where that checkout is
 └── src/puara_addon.cpp       # one descriptor bank per phone
 docs/
-├── NAMESPACE.md              # the OSC contract (versioned, currently 0.3.1)
+├── NAMESPACE.md              # the OSC contract (versioned, currently 0.4.0)
 ├── GESTURE-TESTER.md         # this branch: running the C++ library live
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots

@@ -1,4 +1,4 @@
-# OSC Namespace — `/puara/audience` (v0.3.1)
+# OSC Namespace — `/puara/audience` (v0.4.0)
 
 This document is the **contract** between the puara-bridge and everything
 downstream (ossia score, SpatGRIS, piece logic). The single source of truth in
@@ -16,7 +16,7 @@ Sent once at bridge startup, `connected` also on every join/leave.
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.3.1"` |
+| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.4.0"` |
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
@@ -112,6 +112,74 @@ Behaviour worth knowing before patching against these:
   `|delta| > 1` guard only catches jumps larger than the whole screen.
 - A descriptor is only sent when its value changed, so idle phones cost nothing
   on the wire.
+
+## Sample timestamps — `timestamps`, off by default
+
+The bridge enqueues a message on every phone state update and flushes the queue
+on a fixed timer at `bridgeTick`, 30 Hz by default. Every message in a tick
+therefore leaves within microseconds of its neighbours, whenever the phone
+actually sampled the sensor. A consumer that timestamps datagrams on arrival —
+which is what a recorder does — sees samples quantised onto a 33 ms grid, and
+with `sensorRate: 100` roughly three samples share a timestamp and their order
+within the tick is the queue's rather than the phone's. Raising `bridgeTick`
+narrows the grid without removing it, and multiplies the datagram rate that the
+batching exists to hold down.
+
+The fix is to carry the sample time in the message. The `timestamps` option in
+[`config/puara.yaml`](../config/puara.yaml), live from the dashboard, takes two
+values:
+
+| value | meaning |
+|---|---|
+| `off` | nothing appended. Byte-identical to namespace 0.3.1 — what a show runs |
+| `bridge` | the bridge stamps each message as it is queued, which removes the tick quantisation entirely |
+
+Under `bridge`, **every per-device message** — the raw streams, the gesture
+descriptors, `tap`, `status`, and the C++ descriptors under `/puara/gestures/…`
+on the `gesture-tester` branch — gains three trailing arguments:
+
+| argument | type | meaning |
+|---|---|---|
+| `seq` | `i` | per-address sample counter, monotonic, wrapping at 2³¹ |
+| `t_s` | `i` | whole seconds since the bridge started |
+| `t_us` | `i` | microseconds within that second, 0–999999 |
+
+So `/puara/audience/3/accel fff` becomes `/puara/audience/3/accel fffiii`. The
+sample time in microseconds is `t_s * 1000000 + t_us`.
+
+Aggregates and meta are never stamped: they are computed at the tick and have
+no sample time to report.
+
+Three properties of this that are easy to assume wrong:
+
+- **The time is split across two 32-bit integers rather than sent as one 64-bit
+  `h`.** This is not a preference; `node-osc` cannot encode `h` — its encoder
+  handles `i f s b m N` only, and its `d` narrows to 32-bit float without
+  saying so. Two integers are exact and do not wrap for 68 years.
+- **The epoch is the bridge's own start, not the Unix epoch.** The clock is
+  `process.hrtime.bigint()`, which is monotonic. A wall clock can be stepped
+  backwards by NTP mid-session, and a consumer differencing two samples across
+  the step would read a negative interval as a real measurement.
+- **`seq` does not reset when a phone reconnects.** Counters are keyed by
+  address and ids are recycled, so a restarted counter would look like a large
+  reordering rather than an absence. `status 0` and `status 1` bracket the gap.
+
+What `bridge` does not recover is the phone-to-server path — browser event
+scheduling, the state update, and Wi-Fi transit. Those stay in the measurement
+as an unknown but common-mode term, the same for every sample from a given
+phone under stable conditions, which is enough to compare descriptors against
+each other and to measure onset jitter, but not to state an absolute end-to-end
+latency. Recovering that needs the phone to stamp its own samples and a
+synchronisation layer to convert its clock to the server's; that level is
+specified as `device` in puara-creator's `docs/PUARA_SERVER.md` §2.2 and is
+deliberately absent from the option list until it exists, rather than offered
+and broken.
+
+This option exists for gesture-design sessions recorded with
+[puara-creator](https://github.com/Puara/puara-creator), which reads the
+trailers through the `timestamp_split` field of its namespace schema. Leave it
+`off` for anything else: a patch that reads a fixed argument count breaks under
+it, which is the whole reason for the 0.4.0 minor bump.
 
 ## Touch surface regions
 

@@ -5,11 +5,14 @@ import YAML from 'yaml';
 
 import { DEFAULT_REGIONS, normalizeRegions } from './touch-layout.js';
 import { NATIVE_PARAM_DEFAULTS } from './native-gestures.js';
+import { TIMESTAMP_LEVELS } from './namespace.js';
 
 const DEFAULTS = {
   sensorRate: 100,
   bridgeTick: 30,
   emitRaw: true,
+  // 'off' | 'bridge' — see src/shared/namespace.js and docs/NAMESPACE.md
+  timestamps: 'off',
   interactionMode: 'sensors',
   streams: {
     accel: true,
@@ -57,6 +60,28 @@ const DEFAULTS = {
   oscDestinations: [{ host: '127.0.0.1', port: 9000 }],
 };
 
+// The `yaml` package parses on the YAML 1.2 core schema, where `off` is the
+// string 'off' rather than the boolean false it would be under YAML 1.1. That
+// is the behaviour this option is written for, but the difference is a one-line
+// change away in a dependency and the failure would be silent — an unrecognized
+// value must land on 'off' loudly rather than switch the namespace by accident.
+function normalizeTimestamps(value) {
+  if (value === undefined) {
+    return DEFAULTS.timestamps;
+  }
+  if (value === false) {
+    return 'off';
+  }
+  if (TIMESTAMP_LEVELS.includes(value)) {
+    return value;
+  }
+  console.warn(
+    `[puara] timestamps: ${JSON.stringify(value)} is not one of ` +
+      `${TIMESTAMP_LEVELS.join(', ')} — falling back to 'off'`,
+  );
+  return 'off';
+}
+
 // Node-side only (server and puara-bridge). Browsers receive these values
 // through the `global` shared state.
 export function loadPuaraConfig(root = process.cwd()) {
@@ -75,6 +100,7 @@ export function loadPuaraConfig(root = process.cwd()) {
   return {
     ...DEFAULTS,
     ...parsed,
+    timestamps: normalizeTimestamps(parsed.timestamps),
     streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
     nativeGestures: { ...DEFAULTS.nativeGestures, ...(parsed.nativeGestures || {}) },

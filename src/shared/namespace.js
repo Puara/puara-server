@@ -1,6 +1,11 @@
 // Single source of truth for the OSC namespace — the contract lives in
 // docs/NAMESPACE.md and must match this file exactly.
 
+// 0.4.0 — under the `timestamps` toggle, every per-device message carries three
+// trailing arguments: a per-address sequence number and a sample time split
+// into whole seconds and microseconds within the second. Nothing is appended
+// while the toggle is off, which is the default, so 0.4.0 is byte-identical to
+// 0.3.1 for a show. See docs/NAMESPACE.md "Sample timestamps".
 // 0.3.1 — `touch`/`touch/<n>`/`region` are normalized against the touch surface
 // instead of the viewport; y was biased low by the height of the tab bar and
 // horizontal seams sat half a tab bar below where the phone draws them.
@@ -9,9 +14,16 @@
 // 0.2.0 — `shake` changed from an event float to a continuous 3-axis energy
 // signal (puara-gestures semantics) and `jab` took over the old behaviour;
 // jab/brush/rub/button and multi-touch addresses added.
-export const NAMESPACE_VERSION = '0.3.1';
+export const NAMESPACE_VERSION = '0.4.0';
 
 const ROOT = '/puara/audience';
+
+// Values of the `timestamps` toggle. `device` — the phone stamping its own
+// samples — is specified in puara-creator's docs/PUARA_SERVER.md §2.2 and is
+// not implemented, because it needs clock synchronization between phone and
+// server; it is deliberately absent from this list rather than offered and
+// broken.
+export const TIMESTAMP_LEVELS = ['off', 'bridge'];
 
 export const meta = {
   version: () => `${ROOT}/meta/version`,

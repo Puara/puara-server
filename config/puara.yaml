@@ -15,6 +15,17 @@ bridgeTick: 30
 # disable and keep only aggregates + events.
 emitRaw: true
 
+# Attach a per-sample sequence number and sample time to every per-device
+# message. Off for shows; 'bridge' for gesture-design sessions recorded with
+# puara-creator. Live from the dashboard.
+#   off    — nothing appended, byte-identical to namespace 0.3.1
+#   bridge — the bridge stamps each message as it is queued, which removes the
+#            bridgeTick quantisation from the arrival times a recorder sees
+# Under 'bridge' every /puara/audience/<id>/... message grows by three
+# arguments (seq, t_s, t_us) — a patch that reads a fixed argument count will
+# break, which is why this defaults off. See docs/NAMESPACE.md.
+timestamps: off
+
 # sensors = raw streams + touch + events | touch = touch + events | events-only = tap/shake only
 interactionMode: sensors
 

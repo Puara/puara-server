@@ -21,6 +21,7 @@ import {
   regionCount,
 } from '../shared/touch-layout.js';
 import { NATIVE_PARAMS, NATIVE_ROOT } from '../shared/native-gestures.js';
+import { TIMESTAMP_LEVELS } from '../shared/namespace.js';
 
 // - General documentation: https://soundworks.dev/
 // - API documentation:     https://soundworks.dev/api
@@ -309,6 +310,14 @@ async function main($container) {
               ?active="${global.get('emitRaw')}"
               @change="${e => global.set({ emitRaw: e.detail.value })}"
             ></sc-toggle>
+          </div>
+          <div class="control-row">
+            <sc-text>timestamps</sc-text>
+            <sc-select
+              .options="${TIMESTAMP_LEVELS}"
+              value="${global.get('timestamps')}"
+              @change="${e => global.set({ timestamps: e.detail.value })}"
+            ></sc-select>
           </div>
           ${[
             ['streamAccel', 'accel'],
