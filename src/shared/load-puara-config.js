@@ -13,6 +13,9 @@ const DEFAULTS = {
   emitRaw: true,
   // 'off' | 'bridge' — see src/shared/namespace.js and docs/NAMESPACE.md
   timestamps: 'off',
+  // null = no inbound OSC listener, which is what a show wants. { host, port }
+  // opens one; see docs/NAMESPACE.md "Inbound control".
+  oscInput: null,
   interactionMode: 'sensors',
   streams: {
     accel: true,
@@ -82,6 +85,25 @@ function normalizeTimestamps(value) {
   return 'off';
 }
 
+// Opening a UDP port is not something to do by accident, so anything short of a
+// usable port disables the listener rather than guessing one. A misspelt key
+// leaves the bridge deaf, and a session would discover that only when the cue
+// never arrived — hence the warning on a block that is present but unusable.
+function normalizeOscInput(value) {
+  if (value === undefined || value === null || value === false) {
+    return null;
+  }
+  const port = Number(value.port);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    console.warn(
+      `[puara] oscInput.port ${JSON.stringify(value.port)} is not a usable port — ` +
+        'no inbound OSC listener will be opened',
+    );
+    return null;
+  }
+  return { host: value.host || '0.0.0.0', port };
+}
+
 // Node-side only (server and puara-bridge). Browsers receive these values
 // through the `global` shared state.
 export function loadPuaraConfig(root = process.cwd()) {
@@ -101,6 +123,7 @@ export function loadPuaraConfig(root = process.cwd()) {
     ...DEFAULTS,
     ...parsed,
     timestamps: normalizeTimestamps(parsed.timestamps),
+    oscInput: normalizeOscInput(parsed.oscInput),
     streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
     nativeGestures: { ...DEFAULTS.nativeGestures, ...(parsed.nativeGestures || {}) },

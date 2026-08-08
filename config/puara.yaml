@@ -26,6 +26,17 @@ emitRaw: true
 # break, which is why this defaults off. See docs/NAMESPACE.md.
 timestamps: off
 
+# Inbound OSC, so a recording tool can drive the phones. Absent — the default —
+# opens no port at all, which is what a show wants. Uncomment for a
+# gesture-design session with puara-creator.
+#   /puara/cue  i i   cue index, armed (0 during the count-in)
+#                     buzzes every connected phone with navigator.vibrate()
+# The buzz is the timing reference the reaction time is measured against, so it
+# bypasses the bridgeTick queue entirely: inbound cues are never batched.
+# oscInput:
+#   host: 0.0.0.0
+#   port: 9001
+
 # sensors = raw streams + touch + events | touch = touch + events | events-only = tap/shake only
 interactionMode: sensors
 

@@ -181,6 +181,48 @@ trailers through the `timestamp_split` field of its namespace schema. Leave it
 `off` for anything else: a patch that reads a fixed argument count breaks under
 it, which is the whole reason for the 0.4.0 minor bump.
 
+## Inbound control — `oscInput`, off by default
+
+Everything above is output. The bridge also *listens*, but only when `oscInput`
+is set in [`config/puara.yaml`](../config/puara.yaml); absent, which is the
+default, it opens no port at all. A show has no reason to accept inbound OSC,
+and this exists for gesture-design sessions.
+
+| address | types | meaning |
+|---|---|---|
+| `/puara/cue` | `ii` | cue index, armed (`0` during the count-in) — buzz every connected phone |
+
+The address and its arguments are owned by puara-creator's cue engine, not by
+this repository; they match `src/puara_creator/cue.py`. A cue with no arguments
+is treated as an armed cue at index 0, so a bare bang from a patch works.
+
+**Every connected phone is buzzed.** The recording tool names no device, and a
+session with several performers is meant to cue them together — that is how one
+afternoon yields the subject diversity a corpus needs.
+
+**The cue bypasses the `bridgeTick` queue.** Outbound messages are batched;
+this is not. The buzz is the stimulus that reaction time is measured against,
+so holding it for up to a tick would put 0–33 ms of jitter into the one number
+the exercise exists to measure.
+
+**The count-in feels identical to an armed cue.** The count-in is there so the
+performer entrains to the period, which is exactly what a cue that felt
+different would undermine. `armed` is carried for the recording tool, not for
+the phone.
+
+Two things to know before planning a session around this:
+
+- **iOS Safari implements no Vibration API.** An iPhone cannot be cued
+  haptically at all, whatever this bridge sends. Plan an audible cue for iPhone
+  performers, and do not mix modalities within a subject — the modality is part
+  of the latency being measured.
+- **The motor drives the accelerometer.** The phone is streaming the sensor the
+  buzz shakes, so the cue appears in the recording, at the instant the label is
+  anchored to. The buzz is kept to 40 ms and a gesture follows a cue by
+  150–400 ms, so the artefact does not overlap the gesture, but it is a large
+  energy spike near the start of the labelling window and anything searching
+  that window for an onset has to be told to ignore it.
+
 ## Touch surface regions
 
 The touch surface is designed on the dashboard ("Touch surface" panel) and

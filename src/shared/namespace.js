@@ -25,6 +25,11 @@ const ROOT = '/puara/audience';
 // broken.
 export const TIMESTAMP_LEVELS = ['off', 'bridge'];
 
+// Inbound, not emitted: the one address the bridge listens on when `oscInput` is
+// configured. `i i` — cue index, armed. Owned by puara-creator's cue engine
+// (src/puara_creator/cue.py), so this string has to match that one.
+export const CUE_ADDRESS = '/puara/cue';
+
 export const meta = {
   version: () => `${ROOT}/meta/version`,
   connected: () => `${ROOT}/meta/connected`,

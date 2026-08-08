@@ -697,7 +697,40 @@ async function main($container) {
     `, $container);
   }
 
+  // ## haptic cue
+  //
+  // A cue forwarded from a recording tool (docs/NAMESPACE.md, "Inbound
+  // control"). Delivering it at the instrument rather than on screen is the
+  // point: a visual cue adds display and eye-to-hand latency to the error term
+  // that already dominates the measurement it feeds.
+  //
+  // CUE_MS is short on purpose. The motor drives the accelerometer this phone is
+  // streaming, so the buzz appears in the very signal being recorded, at the
+  // instant the label is anchored to. A gesture follows a cue by 150–400 ms, so
+  // a 40 ms artefact does not overlap it, but it is a large energy spike near
+  // the start of the labelling window and a shorter one is a smaller lie.
+  // iOS Safari implements no Vibration API at all, so an iPhone cannot receive a
+  // haptic cue and the session has to fall back to an audible one for it. That is
+  // a fact about the room, decided before anyone starts recording, so say it once
+  // at startup rather than on every cue.
+  const CUE_MS = 40;
+  const canVibrate = typeof navigator.vibrate === 'function';
+  if (!canVibrate) {
+    console.warn('no Vibration API on this device — haptic cues will not be felt here');
+  }
+
+  function deliverCue() {
+    if (canVibrate) {
+      navigator.vibrate(CUE_MS);
+    }
+  }
+
   global.onUpdate(updates => {
+    // First, and outside the render batching below: this is a stimulus whose
+    // arrival time is the measurement.
+    if ('cue' in updates && updates.cue !== null) {
+      deliverCue();
+    }
     if ('sensorRate' in updates) {
       startSensorLoop();
     }

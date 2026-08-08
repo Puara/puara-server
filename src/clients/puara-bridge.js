@@ -1,10 +1,17 @@
 import '@soundworks/helpers/polyfills.js';
 import { Client } from '@soundworks/core/client.js';
 import { loadConfig, launcher } from '@soundworks/helpers/node.js';
-import { Client as OscClient } from 'node-osc';
+import { Client as OscClient, Server as OscServer } from 'node-osc';
 
 import { loadPuaraConfig } from '../shared/load-puara-config.js';
-import { NAMESPACE_VERSION, meta, device, zone, global as globalNs } from '../shared/namespace.js';
+import {
+  NAMESPACE_VERSION,
+  CUE_ADDRESS,
+  meta,
+  device,
+  zone,
+  global as globalNs,
+} from '../shared/namespace.js';
 import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
 import { flatten, nativeAddress, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { loadAddon } from '../shared/native-addon.js';
@@ -373,6 +380,41 @@ async function bootstrap() {
     runNativeGestures();
     flush();
   }, tickInterval);
+
+  // ## inbound OSC — a recording tool driving the phones
+  //
+  // Only opened when `oscInput` is configured; a show has no reason to listen.
+  // The one address is `/puara/cue i i` (cue index, armed), sent by
+  // puara-creator when it is given `--cue-out`.
+  //
+  // This deliberately does not go through the outbound queue. The buzz is the
+  // stimulus that reaction time is measured against, so a cue held for up to a
+  // bridgeTick would add 0–33 ms of jitter to the one number the whole exercise
+  // exists to measure. Setting the state is the fast path and is the whole job.
+  if (puara.oscInput) {
+    const { host, port } = puara.oscInput;
+    const oscServer = new OscServer(port, host, () => {
+      console.log(`> OSC input: ${host}:${port} — /puara/cue`);
+    });
+
+    oscServer.on('message', ([address, ...args]) => {
+      if (address !== CUE_ADDRESS) {
+        return;
+      }
+      // A cue with no arguments is a bare bang, which is a reasonable thing for
+      // a patch to send; treat it as an armed cue rather than dropping it.
+      const [index = 0, armed = 1] = args;
+      globalState.set({ cue: { index: Number(index), armed: Number(armed) !== 0 } });
+    });
+
+    // The launcher restarts a client that loses the server; without this the old
+    // socket keeps the port and the restarted bridge silently never hears a cue.
+    client.onStatusChange(status => {
+      if (status === 'stopped') {
+        oscServer.close();
+      }
+    });
+  }
 
   // bridge health for the dashboard, 1 Hz
   setInterval(() => {

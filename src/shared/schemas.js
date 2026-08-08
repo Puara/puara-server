@@ -146,6 +146,15 @@ export const globalDescription = {
     list: TIMESTAMP_LEVELS,
     default: 'off',
   },
+  // A cue forwarded from a recording tool over inbound OSC (`oscInput` in
+  // config/puara.yaml), carrying { index, armed }. An event rather than a value:
+  // it is a stimulus at an instant, and a phone joining later must not be buzzed
+  // by a retained one. Every connected phone receives it — the recording tool
+  // names no device, and a session with several performers cues them together.
+  cue: {
+    type: 'any',
+    event: true,
+  },
   // Per-stream enable. Read by BOTH the player (skips the field in its state
   // update, so nothing crosses the WiFi) and the bridge (skips the OSC
   // message). Gating only one side leaves the other spamming — `emitRaw`
