@@ -3,7 +3,8 @@ import path from 'node:path';
 
 import YAML from 'yaml';
 
-import { DEFAULT_REGIONS, normalizeRegions } from './touch-layout.js';
+import { DEFAULT_REGIONS, SURFACES, normalizeRegions } from './touch-layout.js';
+import { GAMEPAD_STYLES } from './gamepad.js';
 import { NATIVE_PARAM_DEFAULTS } from './native-gestures.js';
 import { TIMESTAMP_LEVELS } from './namespace.js';
 
@@ -28,6 +29,7 @@ const DEFAULTS = {
     rub: true,
     button: true,
     region: true,
+    gamepad: true,
   },
   // '' → the server fills in its own LAN origin at startup
   publicAddress: '',
@@ -40,6 +42,10 @@ const DEFAULTS = {
     regions: DEFAULT_REGIONS,
     // on-screen confirmation that a touch was registered and sent
     feedback: true,
+    // 'regions' | 'gamepad' — what the surface draws
+    surface: 'regions',
+    // 'playstation' | 'xbox' — the gamepad's look
+    gamepadStyle: 'playstation',
   },
   // gesture-tester branch: constants for the C++ descriptors the bridge runs
   nativeGestures: NATIVE_PARAM_DEFAULTS,
@@ -85,6 +91,19 @@ function normalizeTimestamps(value) {
   return 'off';
 }
 
+// An enum the state manager would reject outright at boot — a typo in the YAML
+// must cost the operator a warning, not the server.
+function oneOf(value, list, fallback, key) {
+  if (list.includes(value)) {
+    return value;
+  }
+  console.warn(
+    `[puara] ${key}: ${JSON.stringify(value)} is not one of ${list.join(', ')} — ` +
+      `falling back to '${fallback}'`,
+  );
+  return fallback;
+}
+
 // Opening a UDP port is not something to do by accident, so anything short of a
 // usable port disables the listener rather than guessing one. A misspelt key
 // leaves the bridge deaf, and a session would discover that only when the cue
@@ -128,6 +147,16 @@ export function loadPuaraConfig(root = process.cwd()) {
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
     nativeGestures: { ...DEFAULTS.nativeGestures, ...(parsed.nativeGestures || {}) },
     // hand-written YAML is the one place a malformed colour can enter
-    touch: { ...touch, regions: normalizeRegions(touch.regions) },
+    touch: {
+      ...touch,
+      regions: normalizeRegions(touch.regions),
+      surface: oneOf(touch.surface, SURFACES, DEFAULTS.touch.surface, 'touch.surface'),
+      gamepadStyle: oneOf(
+        touch.gamepadStyle,
+        GAMEPAD_STYLES,
+        DEFAULTS.touch.gamepadStyle,
+        'touch.gamepadStyle',
+      ),
+    },
   };
 }

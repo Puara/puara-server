@@ -381,6 +381,156 @@ body.loading {
 }
 
 // ---------------------------------------------------------
+// puara-server — virtual gamepad (player surface + dashboard preview)
+// ---------------------------------------------------------
+// Positions and sizes are inline px from gamepadLayout(); this is the look only.
+// Same discipline as the regions: outlines and faint fills on black, and the
+// pressed state takes light away instead of adding it.
+.gamepad {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-touch-callout: none;
+
+  --pad-line: rgba(255, 255, 255, 0.3);
+  --pad-fill: rgba(255, 255, 255, 0.06);
+  --pad-ink: rgba(255, 255, 255, 0.78);
+
+  & > div {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: var(--pad-ink);
+    transition: transform 60ms ease-out, opacity 60ms linear;
+  }
+
+  span {
+    font-weight: bold;
+    line-height: 1;
+    letter-spacing: 0.04em;
+  }
+
+  .pad-face {
+    border-radius: 50%;
+    border: 2px solid var(--pad-line);
+    background-color: var(--pad-fill);
+
+    svg {
+      width: 64%;
+      height: 64%;
+      overflow: visible;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 0.17;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  }
+
+  .pad-shoulder {
+    border: 2px solid var(--pad-line);
+    background-color: var(--pad-fill);
+    border-radius: 8px 8px 14px 14px;
+  }
+
+  .pad-pill {
+    border: 2px solid var(--pad-line);
+    background-color: var(--pad-fill);
+    border-radius: 999px;
+
+    span {
+      font-weight: normal;
+    }
+  }
+
+  .pad-dpad svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+
+    .pad-dpad-hub,
+    .pad-dpad-arm {
+      fill: var(--pad-fill);
+    }
+
+    .pad-dpad-arrow {
+      fill: var(--pad-ink);
+      fill-opacity: 0.85;
+    }
+
+    .pad-dpad-outline {
+      fill: none;
+      stroke: var(--pad-line);
+      stroke-width: 0.03;
+      stroke-linejoin: round;
+    }
+
+    g path {
+      transition: fill-opacity 60ms linear;
+    }
+
+    g.pressed .pad-dpad-arm {
+      fill-opacity: 0;
+    }
+
+    g.pressed .pad-dpad-arrow {
+      fill-opacity: 0.12;
+    }
+  }
+
+  .pad-stick {
+    border-radius: 50%;
+    border: 2px solid var(--pad-line);
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .pad-knob {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    background-color: rgba(255, 255, 255, 0.1);
+    will-change: transform;
+  }
+
+  & > div.pressed {
+    transform: scale(0.9);
+    opacity: 0.4;
+  }
+
+  // glyph colours, kept muted — these are a light source in the dome too
+  &.gamepad-playstation {
+    .pad-south { color: #7ea6f2; }
+    .pad-east { color: #ee7d7d; }
+    .pad-west { color: #e79acd; }
+    .pad-north { color: #62d3ad; }
+  }
+
+  &.gamepad-xbox {
+    .pad-south { color: #74c063; }
+    .pad-east { color: #e3635a; }
+    .pad-west { color: #5a9ee6; }
+    .pad-north { color: #e8bf4f; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    & > div,
+    .pad-dpad svg g path {
+      transition: none;
+    }
+  }
+}
+
+// The Data tab's pad is sized for a region split; a controller needs room for
+// two thumbs.
+.player-layout .data-touchpad.gamepad-pad {
+  height: 40vh;
+  max-height: 280px;
+}
+
+// ---------------------------------------------------------
 // puara-server — controller dashboard
 // ---------------------------------------------------------
 .controller-layout {

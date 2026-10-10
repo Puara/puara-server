@@ -189,8 +189,8 @@ Everything tunable lives in [`config/puara.yaml`](config/puara.yaml):
 (`sensors` / `touch` / `events-only`), `zones` (dome sections → QR codes),
 `streams` (per-stream enable for accel/gyro/orientation/touch and each gesture
 descriptor — gates the phone uplink, not just the OSC output), `publicAddress`
-(origin the QR codes point at), `maxTouches`, `touch` (touch surface design —
-see below), `gestures` (puara-gestures constants), `maxClients`,
+(origin the QR codes point at), `maxTouches`, `touch` (touch surface design,
+regions or virtual gamepad — see below), `gestures` (puara-gestures constants), `maxClients`,
 `oscDestinations`. Everything except
 `bridgeTick`/`maxClients`/`oscDestinations` can also be changed **live** from
 the controller dashboard.
@@ -254,6 +254,38 @@ values above it move while a finger is on it, which is the only way to watch
 `touch`, `brush`/`rub`, `button` and `region` respond to a known gesture. It
 sends for real, and it is only offered while the show is running.
 
+### Virtual gamepad
+
+The surface can be drawn as a game controller instead of coloured regions —
+**surface** `gamepad` in the *Touch surface* panel, or `touch.surface: gamepad`
+in `config/puara.yaml`. Modelled on an emulator's touchscreen overlay
+(DuckStation's): d-pad and face buttons under the thumbs, two analogue sticks,
+L1/L2/R1/R2 at the top, Select/Start in the middle. Portrait or landscape,
+whichever way the phone is held; the layout and the hit test share one geometry
+([`src/shared/gamepad.js`](src/shared/gamepad.js)), so the button reported is
+the one drawn under the finger.
+
+- **The touch data does not change.** `touch`, `touch/<n>`, `tap`,
+  `brush`/`rub`, `button` and `region` are computed from the same pointers as
+  with the regions drawn (`region` keeps following the split, invisibly).
+- **The controller adds its own**, under `streams.gamepad`:
+  `/puara/audience/<id>/gamepad/<button> i` (`1` press, `0` release) for
+  `south east west north l1 r1 l2 r2 select start dpad/up dpad/down dpad/left
+  dpad/right`, and `/puara/audience/<id>/gamepad/stick/left|right ff` in
+  −1..1. Audience-scale counts per button and mean sticks go out on
+  `/puara/audience/global/gamepad/...` while the surface is a gamepad.
+- **gamepad style** — `playstation` (✕ ○ □ △, L1/R1) or `xbox` (A B X Y, LB/RB).
+  Look only: OSC names are positional (`south` is ✕ *and* A), so a patch
+  survives the switch.
+- Fingers slide from button to button without lifting; a thumb between two face
+  buttons presses both, and between two d-pad arms gives the diagonal. A stick
+  is grabbed from a little outside its base and held until the finger lifts.
+- A phone that drops out mid-press, or a surface switched back to regions, sends
+  the releases, so nothing downstream is left held.
+
+The Data tab's pad becomes a miniature controller too, and its `gamepad` row
+shows the buttons held and both sticks.
+
 **Upgrading from namespace 0.3.0:** touch coordinates are now normalized against
 the touch surface rather than the viewport, so `y = 1` is the bottom of the area
 the audience can actually touch. Previously `y` was biased low by the height of
@@ -285,6 +317,9 @@ src/
 └── shared/
     ├── schemas.js            # SharedState class descriptions
     ├── namespace.js          # OSC namespace builder (single source of truth)
+    ├── touch-layout.js       # region split geometry
+    ├── gamepad.js            # virtual gamepad layout + hit testing
+    ├── gamepad-view.js       # its lit drawing (player + dashboard preview)
     ├── strings.js            # FR/EN UI strings
     └── load-puara-config.js  # config/puara.yaml loader (node side)
 native/                       # gesture-tester branch: the puara-gestures addon
@@ -292,7 +327,7 @@ native/                       # gesture-tester branch: the puara-gestures addon
 ├── gestures-path.cjs         # where that checkout is
 └── src/puara_addon.cpp       # one descriptor bank per phone
 docs/
-├── NAMESPACE.md              # the OSC contract (versioned, currently 0.4.0)
+├── NAMESPACE.md              # the OSC contract (versioned, currently 0.5.0)
 ├── GESTURE-TESTER.md         # this branch: running the C++ library live
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots

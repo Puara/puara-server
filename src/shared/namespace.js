@@ -1,6 +1,10 @@
 // Single source of truth for the OSC namespace — the contract lives in
 // docs/NAMESPACE.md and must match this file exactly.
 
+// 0.5.0 — virtual gamepad: per-device `gamepad/<button>` and
+// `gamepad/stick/<side>`, and the audience-scale `global/gamepad/...` counts and
+// mean sticks, emitted while the touch surface is drawn as a gamepad. Additive;
+// nothing that existed in 0.4.0 changed.
 // 0.4.0 — under the `timestamps` toggle, every per-device message carries three
 // trailing arguments: a per-address sequence number and a sample time split
 // into whole seconds and microseconds within the second. Nothing is appended
@@ -14,7 +18,7 @@
 // 0.2.0 — `shake` changed from an event float to a continuous 3-axis energy
 // signal (puara-gestures semantics) and `jab` took over the old behaviour;
 // jab/brush/rub/button and multi-touch addresses added.
-export const NAMESPACE_VERSION = '0.4.0';
+export const NAMESPACE_VERSION = '0.5.0';
 
 const ROOT = '/puara/audience';
 
@@ -60,6 +64,10 @@ export const device = {
   buttonPress: id => `${ROOT}/${id}/button/press`,
   buttonHold: id => `${ROOT}/${id}/button/hold`,
   buttonPressTime: id => `${ROOT}/${id}/button/presstime`,
+  // virtual gamepad — `name` from GAMEPAD_BUTTONS (src/shared/gamepad.js), e.g.
+  // 'south' or 'dpad/up'; `side` is 'left' | 'right'
+  gamepadButton: (id, name) => `${ROOT}/${id}/gamepad/${name}`,
+  gamepadStick: (id, side) => `${ROOT}/${id}/gamepad/stick/${side}`,
 };
 
 export const zone = {
@@ -76,4 +84,8 @@ export const global = {
   // answer the sub-areas exist for, emitted for every region of the current
   // split so a piece can read them as a fixed-size set
   regionCount: n => `${ROOT}/global/region/${n}/count`,
+  // how many phones hold each gamepad button, and the mean of every phone's
+  // stick (a phone not touching it counts as centred)
+  gamepadCount: name => `${ROOT}/global/gamepad/${name}/count`,
+  gamepadStick: side => `${ROOT}/global/gamepad/stick/${side}`,
 };

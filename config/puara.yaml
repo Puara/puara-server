@@ -60,6 +60,8 @@ streams:
   rub: true
   button: true
   region: true
+  # virtual gamepad buttons and sticks (touch.surface: gamepad)
+  gamepad: true
 
 # Origin the QR codes point at. Leave blank and the server uses its own LAN
 # address (env serverAddress, else the first non-internal IPv4 interface) —
@@ -97,6 +99,19 @@ touch:
     - { label: '', color: '#6b1b3a' }
     - { label: '', color: '#1b6b4a' }
     - { label: '', color: '#6b5a1b' }
+
+  # What the surface draws:
+  #   regions = the coloured split above
+  #   gamepad = a virtual game controller (d-pad, face buttons, two sticks,
+  #             shoulders, select/start), like an emulator's touch overlay
+  # The touch data is the same either way — touch, tap, brush/rub, button and
+  # region keep flowing. gamepad adds /puara/audience/<id>/gamepad/... on top
+  # (streams.gamepad). See docs/NAMESPACE.md "Virtual gamepad".
+  surface: regions
+
+  # playstation (✕ ○ □ △) or xbox (A B X Y). The look only — OSC names are
+  # positional (south/east/west/north), so patches survive a switch.
+  gamepadStyle: playstation
 
   # On-screen confirmation of a touch: a thin ring under the finger, brightening
   # once the payload has actually left the phone, and the pressed region dimmed.

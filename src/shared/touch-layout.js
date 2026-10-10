@@ -10,6 +10,13 @@
 // both here and on screen.
 export const SPLITS = ['single', 'columns', 'rows', 'quad'];
 
+// What the surface draws. `regions` is the coloured split above; `gamepad` is a
+// virtual controller (src/shared/gamepad.js). The touch data is identical in
+// both — `touch`, `touches`, `tap`, brush/rub/button and `region` are computed
+// from the same pointers whatever is drawn — and `gamepad` adds its own
+// buttons and sticks on top.
+export const SURFACES = ['regions', 'gamepad'];
+
 // Kept deliberately dark: the audience holds these screens inside the
 // Satosphère, and four bright panels would light the dome from the seats.
 export const DEFAULT_REGIONS = [

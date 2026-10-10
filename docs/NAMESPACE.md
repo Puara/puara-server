@@ -1,4 +1,4 @@
-# OSC Namespace — `/puara/audience` (v0.4.0)
+# OSC Namespace — `/puara/audience` (v0.5.0)
 
 This document is the **contract** between the puara-bridge and everything
 downstream (ossia score, SpatGRIS, piece logic). The single source of truth in
@@ -16,7 +16,7 @@ Sent once at bridge startup, `connected` also on every join/leave.
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.4.0"` |
+| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.5.0"` |
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
@@ -257,6 +257,59 @@ Always left-to-right, then top-to-bottom.
 - `region` follows the **primary** pointer only, like `touch` and `brush`/`rub`.
   Multi-touch across several regions is visible in `touch/<n>`, not here.
 
+## Virtual gamepad — `touch.surface: gamepad`, gated by `streams.gamepad`
+
+Added in 0.5.0. The touch surface can be drawn as a game controller instead of
+the regions (dashboard *Touch surface* panel → `surface`). Layout and hit
+testing: [`src/shared/gamepad.js`](../src/shared/gamepad.js).
+
+Nothing above changes in gamepad mode: `touch`, `touch/<n>`, `tap`, `brush`,
+`rub`, `button/*` and `region` are computed from the same pointers as with the
+regions drawn — `region` keeps following `split` even though the split is not
+on screen. The addresses below are **added** on top.
+
+Like `region`, these are descriptors of the touch, not raw streams: emitted in
+every `interactionMode`, not gated by `emitRaw`, and `streams.gamepad: false`
+removes them from the phone uplink as well as from OSC.
+
+| address | types | value |
+|---|---|---|
+| `/puara/audience/<id>/gamepad/<button>` | `i` | `1` on press, `0` on release — one message per change, never repeated while held |
+| `/puara/audience/<id>/gamepad/stick/left` | `ff` | x, y in −1..1, **+y down** (W3C Gamepad API); sent when it changes |
+| `/puara/audience/<id>/gamepad/stick/right` | `ff` | same |
+
+`<button>` is positional, never the printed glyph, so a patch survives switching
+`gamepadStyle`:
+
+| `<button>` | PlayStation | Xbox | W3C index |
+|---|---|---|---|
+| `south` | ✕ | A | 0 |
+| `east` | ○ | B | 1 |
+| `west` | □ | X | 2 |
+| `north` | △ | Y | 3 |
+| `l1` / `r1` | L1 / R1 | LB / RB | 4 / 5 |
+| `l2` / `r2` | L2 / R2 | LT / RT | 6 / 7 |
+| `select` / `start` | Select / Start | View / Menu | 8 / 9 |
+| `dpad/up` `dpad/down` `dpad/left` `dpad/right` | d-pad | d-pad | 12–15 |
+
+The W3C index is the bit in the `gamepadButtons` mask the phone sends, matching
+`navigator.getGamepads()[n].buttons[index]`. Stick clicks (10/11) and home (16)
+have no touch control.
+
+- **Buttons are sent from the touch handler, not the sensor tick**, so a press
+  shorter than one tick still reaches OSC; at a low `sensorRate` it would
+  otherwise be lost. Sticks ride the tick like `touch`.
+- Triggers are digital: `l2`/`r2` are `0`/`1`, not an axis.
+- A finger can slide across buttons without lifting. Between two face buttons
+  both are pressed; between two d-pad arms both directions are (the diagonal).
+- Sticks have a radial dead zone of 0.12, rescaled so the rim still reads 1, and
+  three decimals of resolution. A stick is held by the finger that grabbed it
+  until that finger lifts, wherever it travels.
+- **Releases are guaranteed.** A phone that disconnects mid-press gets a `0` on
+  every button it held and its sticks zeroed by the bridge, after its
+  `/status 0`. Switching the surface back to `regions`, a tab change or a panic
+  release on the phone — sent immediately, even while paused.
+
 ## Zone aggregates — always emitted, at `bridgeTick`
 
 `<zone>` is a zone name from `config/puara.yaml` (phones join a zone through
@@ -277,6 +330,9 @@ Only zones with at least one connected player are emitted.
 | `/puara/audience/global/taps` | `f` | taps/second across all players, 2 s window |
 | `/puara/audience/global/touchcount` | `i` | players currently touching the screen |
 | `/puara/audience/global/region/<n>/count` | `i` | players currently touching region `<n>`, `<n>` = 0–3 **always** (regions the current split does not use report `0`), gated by `streams.region` |
+| `/puara/audience/global/gamepad/<button>/count` | `i` | players currently holding `<button>`, every button at every tick — **only while the surface is `gamepad`** and `streams.gamepad` is on, plus one final round of `0`s when either stops |
+| `/puara/audience/global/gamepad/stick/left` | `ff` | mean left stick across **all** connected players (a phone not touching it counts as centred) — same gating as above |
+| `/puara/audience/global/gamepad/stick/right` | `ff` | same, right stick |
 
 ## Axis conventions & caveats
 

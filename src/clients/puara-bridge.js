@@ -13,6 +13,7 @@ import {
   global as globalNs,
 } from '../shared/namespace.js';
 import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
+import { GAMEPAD_BUTTONS, GAMEPAD_STICKS } from '../shared/gamepad.js';
 import { flatten, nativeAddress, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { loadAddon } from '../shared/native-addon.js';
 
@@ -177,6 +178,73 @@ async function bootstrap() {
     enqueueDevice(device.buttonPressTime(id), f(button.pressTime));
   }
 
+  // ## virtual gamepad
+  // Last buttons and sticks per player, so a press goes out as the one button
+  // that changed rather than the whole mask, and a phone that drops out
+  // mid-press can be released downstream instead of leaving a held note.
+  const gamepads = new Map(); // player id -> { buttons, sticks }
+
+  function gamepadOf(id) {
+    let pad = gamepads.get(id);
+    if (pad === undefined) {
+      pad = { buttons: 0, sticks: [0, 0, 0, 0] };
+      gamepads.set(id, pad);
+    }
+    return pad;
+  }
+
+  // Tracks the truth whatever the toggle says, and only emits under it, so
+  // switching the stream back on diffs against what the phone really holds.
+  function emitGamepad(id, updates) {
+    const pad = gamepadOf(id);
+    const enabled = globalState.get('streamGamepad');
+
+    if ('gamepadButtons' in updates) {
+      const changed = pad.buttons ^ updates.gamepadButtons;
+      pad.buttons = updates.gamepadButtons;
+      if (enabled && changed) {
+        for (const { name, bit } of GAMEPAD_BUTTONS) {
+          if (changed & (1 << bit)) {
+            enqueueDevice(device.gamepadButton(id, name), i((pad.buttons >> bit) & 1));
+          }
+        }
+      }
+    }
+
+    if (updates.gamepadSticks != null) {
+      const previous = pad.sticks;
+      pad.sticks = updates.gamepadSticks;
+      if (enabled) {
+        GAMEPAD_STICKS.forEach((side, n) => {
+          const [x, y] = pad.sticks.slice(2 * n, 2 * n + 2);
+          if (x !== previous[2 * n] || y !== previous[2 * n + 1]) {
+            enqueueDevice(device.gamepadStick(id, side), f(x), f(y));
+          }
+        });
+      }
+    }
+  }
+
+  // A phone gone mid-press: zero what it held. `/status 0` says it left, but a
+  // patch bound to `gamepad/south` would otherwise keep sounding.
+  function releaseGamepad(id) {
+    const pad = gamepads.get(id);
+    gamepads.delete(id);
+    if (pad === undefined || !globalState.get('streamGamepad')) {
+      return;
+    }
+    for (const { name, bit } of GAMEPAD_BUTTONS) {
+      if (pad.buttons & (1 << bit)) {
+        enqueueDevice(device.gamepadButton(id, name), i(0));
+      }
+    }
+    GAMEPAD_STICKS.forEach((side, n) => {
+      if (pad.sticks[2 * n] !== 0 || pad.sticks[2 * n + 1] !== 0) {
+        enqueueDevice(device.gamepadStick(id, side), f(0), f(0));
+      }
+    });
+  }
+
   players.onUpdate((player, updates) => {
     const id = player.get('id');
 
@@ -199,6 +267,9 @@ async function bootstrap() {
     if ('region' in updates && globalState.get('streamRegion')) {
       enqueueDevice(device.region(id), i(updates.region));
     }
+    // like `region`, a descriptor of the touch rather than a raw stream: every
+    // interaction mode, not gated by emitRaw
+    emitGamepad(id, updates);
     // events always pass, whatever the mode — they are what scales
     if (updates.tap) {
       tapLog.push([Date.now(), player.get('zone')]);
@@ -212,6 +283,46 @@ async function bootstrap() {
   });
 
   // ## aggregates at a fixed tick — often what the piece actually consumes
+
+  // Emitted only while the surface is a gamepad: 16 addresses per tick for a
+  // controller nobody is holding is noise. The tick after it stops being one
+  // sends a last round of zeros, so a patch is not left latched on the counts
+  // from the moment the operator switched back to regions.
+  let gamepadAggregatesLive = false;
+
+  function computeGamepadAggregates() {
+    const live = globalState.get('streamGamepad')
+      && globalState.get('touchSurface') === 'gamepad';
+    if (!live && !gamepadAggregatesLive) {
+      return;
+    }
+    gamepadAggregatesLive = live;
+
+    const counts = new Array(GAMEPAD_BUTTONS.length).fill(0);
+    const sums = [0, 0, 0, 0];
+    if (live) {
+      players.forEach(player => {
+        const buttons = player.get('gamepadButtons');
+        GAMEPAD_BUTTONS.forEach(({ bit }, n) => {
+          if (buttons & (1 << bit)) {
+            counts[n] += 1;
+          }
+        });
+        player.get('gamepadSticks').forEach((value, n) => {
+          sums[n] += value;
+        });
+      });
+    }
+
+    GAMEPAD_BUTTONS.forEach(({ name }, n) => {
+      enqueue(globalNs.gamepadCount(name), i(counts[n]));
+    });
+    const mean = value => (players.size ? value / players.size : 0);
+    GAMEPAD_STICKS.forEach((side, n) => {
+      enqueue(globalNs.gamepadStick(side), f(mean(sums[2 * n])), f(mean(sums[2 * n + 1])));
+    });
+  }
+
   function computeAggregates() {
     const now = Date.now();
     while (tapLog.length && tapLog[0][0] < now - TAP_WINDOW * 1000) {
@@ -350,6 +461,7 @@ async function bootstrap() {
     const id = player.get('id');
     enqueueDevice(device.status(id), i(0));
     enqueue(meta.connected(), i(players.size));
+    releaseGamepad(id);
 
     // the descriptors carry accumulated state; a rejoining phone starts clean
     banks.delete(id);
@@ -413,6 +525,7 @@ async function bootstrap() {
 
   setInterval(() => {
     computeAggregates();
+    computeGamepadAggregates();
     runNativeGestures();
     flush();
   }, 1000 / puara.bridgeTick);

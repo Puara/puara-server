@@ -1,8 +1,9 @@
 // SharedState class descriptions — cf. https://soundworks.dev/api
 // Units and axis conventions are the OSC contract: see docs/NAMESPACE.md.
 
-import { SPLITS, DEFAULT_REGIONS } from './touch-layout.js';
+import { SPLITS, SURFACES, DEFAULT_REGIONS } from './touch-layout.js';
 import { TIMESTAMP_LEVELS } from './namespace.js';
+import { GAMEPAD_STYLES } from './gamepad.js';
 
 // One `player` state per connected phone, owned by the phone.
 export const playerDescription = {
@@ -44,6 +45,15 @@ export const playerDescription = {
   // touching. Mirrors `touch` as one integer, so a piece can react to "which
   // panel" without duplicating the region math.
   region: { type: 'integer', default: -1, min: -1, max: 3 },
+  // ## virtual gamepad (touchSurface: 'gamepad'), see src/shared/gamepad.js
+  // Pressed buttons as a bitmask, bit n = W3C Standard Gamepad button n. An
+  // integer rather than an array so soundworks diffs it and a press costs a few
+  // bytes. Set from the pointer handler, not the tick: a press shorter than one
+  // tick would otherwise never leave the phone.
+  gamepadButtons: { type: 'integer', default: 0 },
+  // [leftX, leftY, rightX, rightY] in -1..1, +y down (W3C Gamepad API). Rides
+  // the tick like `touch`.
+  gamepadSticks: { type: 'any', default: [0, 0, 0, 0] },
 
   // ## diagnostics
   // 0-1, -1 when the Battery API is unavailable (iOS Safari)
@@ -96,6 +106,7 @@ export const globalDescription = {
   streamRub: { type: 'boolean', default: true },
   streamButton: { type: 'boolean', default: true },
   streamRegion: { type: 'boolean', default: true },
+  streamGamepad: { type: 'boolean', default: true },
 
   // Origin the QR codes point at, e.g. 'https://connect.sat.qc.ca:8000'. The
   // server seeds it from config/puara.yaml, falling back to its own LAN
@@ -132,6 +143,11 @@ export const globalDescription = {
   // ## touch surface design — authored on the dashboard, live on every phone.
   // See src/shared/touch-layout.js for the region ordering and geometry.
   touchSplit: { type: 'enum', list: SPLITS, default: 'single' },
+  // What the surface draws: the coloured regions or a virtual gamepad. The
+  // touch data is the same either way; `gamepad` adds buttons and sticks.
+  touchSurface: { type: 'enum', list: SURFACES, default: 'regions' },
+  // Look only — the OSC names are positional, so a patch survives a switch.
+  gamepadStyle: { type: 'enum', list: GAMEPAD_STYLES, default: 'playstation' },
   // Headline shown across the surface. Empty falls back to the built-in
   // bilingual "Touchez l'écran / Touch the screen" — an operator who types
   // their own text is on their own for translation.

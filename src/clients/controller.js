@@ -16,10 +16,13 @@ import '@ircam/sc-components/sc-toggle.js';
 import { tt } from '../shared/strings.js';
 import {
   SPLITS,
+  SURFACES,
   gridGeometry,
   normalizeRegions,
   regionCount,
 } from '../shared/touch-layout.js';
+import { GAMEPAD_STYLES, gamepadLayout } from '../shared/gamepad.js';
+import { renderGamepad } from '../shared/gamepad-view.js';
 import { NATIVE_PARAMS, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { TIMESTAMP_LEVELS } from '../shared/namespace.js';
 
@@ -39,7 +42,11 @@ const STREAM_TOGGLES = [
   ['streamRub', 'rub'],
   ['streamButton', 'button'],
   ['streamRegion', 'region'],
+  ['streamGamepad', 'gamepad'],
 ];
+
+// inside of the phone-shaped preview: .touch-preview in app.scss, less its border
+const PREVIEW_SIZE = [178, 318];
 
 // Gesture settings panel. Ranges mirror the min/max in shared/schemas.js —
 // soundworks rejects out-of-range writes, so keep the two in step.
@@ -226,6 +233,13 @@ async function main($container) {
   // Phone-shaped preview, using the same geometry helper the players do, so what
   // the operator sees here is what the audience gets.
   function renderTouchPreview() {
+    if (global.get('touchSurface') === 'gamepad') {
+      return html`
+        <div class="touch-preview">
+          ${renderGamepad(gamepadLayout(...PREVIEW_SIZE), global.get('gamepadStyle'), 0)}
+        </div>`;
+    }
+
     const { cols, rows } = gridGeometry(global.get('touchSplit'));
     const text = global.get('touchText').trim();
 
@@ -299,8 +313,22 @@ async function main($container) {
           under the finger, the pressed region dimmed) happens on the phones
           only; the preview below shows the design, not the interaction.
         </p>
+        <p class="hint">
+          <code>gamepad</code> draws a virtual controller instead of the regions.
+          Every touch stream above keeps flowing unchanged (<code>region</code>
+          still follows the split, though it is not drawn); the controller adds
+          <code>/puara/audience/&lt;id&gt;/gamepad/…</code> on top, under the
+          <code>gamepad</code> stream. The style is the look only — OSC names
+          are positional, so a patch survives a switch.
+        </p>
+        ${selectRow('surface', 'touchSurface', SURFACES)}
+        ${global.get('touchSurface') === 'gamepad'
+          ? selectRow('gamepad style', 'gamepadStyle', GAMEPAD_STYLES)
+          : ''}
         ${selectRow('split', 'touchSplit', SPLITS)}
-        ${textRow('text (blank = FR/EN default)', 'touchText')}
+        ${global.get('touchSurface') === 'gamepad'
+          ? ''
+          : textRow('text (blank = FR/EN default)', 'touchText')}
         ${toggleRow('touch feedback', 'touchFeedback')}
         ${visibleRegions().map((region, index) => html`
           <div class="control-row">

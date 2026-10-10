@@ -14,6 +14,13 @@ import {
   regionAt,
   regionCount,
 } from '../shared/touch-layout.js';
+import {
+  buttonLabel,
+  createGamepadInput,
+  gamepadLayout,
+  pressedButtons,
+} from '../shared/gamepad.js';
+import { renderGamepad } from '../shared/gamepad-view.js';
 
 const TAP_MAX_DURATION = 250; // ms
 // low-pass coefficient for the gravity estimate; ~0.5 s time constant at 60 Hz
@@ -45,6 +52,8 @@ const DATA_ROWS = [
   { key: 'rub', label: 'rub', unit: '', stream: 'streamRub', modes: null },
   { key: 'button', label: 'button', unit: '', stream: 'streamButton', modes: null },
   { key: 'region', label: 'region', unit: '', stream: 'streamRegion', modes: null },
+  // `surface`: only sent while the touch surface is drawn as that
+  { key: 'gamepad', label: 'gamepad', unit: '', stream: 'streamGamepad', modes: null, surface: 'gamepad' },
 ];
 
 function formatNumber(value) {
@@ -182,10 +191,27 @@ async function main($container) {
   // and each normalizes against its own box.
   let cachedTarget = null;
   let cachedRect = null;
+  // The same element's padding box, which is what the gamepad is laid out in:
+  // the Data tab's pad has a border, and its children are positioned inside it.
+  let cachedInner = null;
 
   function invalidateGeometry() {
     cachedTarget = null;
     cachedRect = null;
+    cachedInner = null;
+  }
+
+  function measure(target) {
+    if (cachedRect === null || cachedTarget !== target) {
+      cachedTarget = target;
+      cachedRect = target.getBoundingClientRect();
+      cachedInner = {
+        left: cachedRect.left + target.clientLeft,
+        top: cachedRect.top + target.clientTop,
+        width: target.clientWidth,
+        height: target.clientHeight,
+      };
+    }
   }
 
   window.addEventListener('resize', invalidateGeometry);
@@ -198,10 +224,7 @@ async function main($container) {
   // seam of a `quad` half a tab bar away from where the audience sees it — and
   // the pressed region would then disagree with the reported `region`.
   function pointerPosition(e) {
-    if (cachedRect === null || cachedTarget !== e.currentTarget) {
-      cachedTarget = e.currentTarget;
-      cachedRect = e.currentTarget.getBoundingClientRect();
-    }
+    measure(e.currentTarget);
     const rect = cachedRect;
     // A zero-area rect would divide to NaN and put NaN on the wire, which is
     // worse than a slightly wrong number in every downstream patch.
@@ -293,6 +316,86 @@ async function main($container) {
     }
   }
 
+  // ## virtual gamepad — the same pointers, read a second way. Everything above
+  // still runs in gamepad mode, so `touch`, `tap`, brush/rub, button and
+  // `region` reach OSC exactly as with the regions drawn; the controller adds
+  // its buttons and sticks on top.
+  const gamepad = createGamepadInput();
+  // the mask last sent, which is also the one drawn as pressed
+  let gamepadMask = 0;
+  let layoutCache = { key: '', layout: null };
+
+  function gamepadActive() {
+    return global.get('touchSurface') === 'gamepad';
+  }
+
+  // memoized: hit-tested on every pointermove, and recomputed only on resize
+  function layoutFor(width, height) {
+    const key = `${width}x${height}`;
+    if (layoutCache.key !== key) {
+      layoutCache = { key, layout: width > 0 && height > 0 ? gamepadLayout(width, height) : null };
+    }
+    return layoutCache.layout;
+  }
+
+  // px in the target's padding box, the frame the layout was drawn in
+  function gamepadPoint(e) {
+    measure(e.currentTarget);
+    return {
+      layout: layoutFor(cachedInner.width, cachedInner.height),
+      x: e.clientX - cachedInner.left,
+      y: e.clientY - cachedInner.top,
+    };
+  }
+
+  // Straight to the DOM, like the rings: a knob follows every pointermove.
+  function positionKnobs() {
+    const feedback = global.get('touchFeedback');
+    for (const $stick of $container.querySelectorAll('.pad-stick')) {
+      const [vx, vy] = feedback ? gamepad.knob($stick.dataset.stick) : [0, 0];
+      const r = Number($stick.dataset.r);
+      $stick.firstElementChild.style.transform = `translate(${vx * r}px, ${vy * r}px)`;
+    }
+  }
+
+  // Buttons leave the phone from here rather than from `tick()`: a press and
+  // release inside one tick would leave the mask unchanged at both ends and the
+  // press would never be sent — at a 10 Hz `sensorRate` that is any quick tap.
+  // A mask change is rare enough that a render per change is affordable.
+  function syncGamepad() {
+    positionKnobs();
+    const mask = gamepad.buttons();
+    if (mask === gamepadMask) {
+      return;
+    }
+    gamepadMask = mask;
+    if (global.get('streamGamepad')) {
+      player.set({ gamepadButtons: mask });
+    }
+    renderApp();
+  }
+
+  // Every way the controller can disappear from under a thumb — tab switch,
+  // panic, switching back to regions — ends here, and sends the release now
+  // even when paused: the alternative is a button held downstream until the
+  // show resumes.
+  function releaseGamepad() {
+    gamepad.clear();
+    positionKnobs();
+    const payload = {};
+    if (gamepadMask !== 0) {
+      gamepadMask = 0;
+      payload.gamepadButtons = 0;
+    }
+    // nothing to zero on a phone that has never sent a stick
+    if (lastSent.gamepadSticks !== undefined) {
+      addIfChanged(payload, 'gamepadSticks', [0, 0, 0, 0]);
+    }
+    if (Object.keys(payload).length > 0 && global.get('streamGamepad')) {
+      player.set(payload);
+    }
+  }
+
   function onPointerDown(e) {
     e.preventDefault();
     if (pointers.size === 0) {
@@ -300,7 +403,16 @@ async function main($container) {
     }
     const position = pointerPosition(e);
     pointers.set(e.pointerId, position);
-    addMark(e.pointerId, position);
+    if (gamepadActive()) {
+      // the pressed button is the confirmation; a ring over it is clutter
+      const { layout, x, y } = gamepadPoint(e);
+      if (layout !== null) {
+        gamepad.down(layout, e.pointerId, x, y);
+        syncGamepad();
+      }
+    } else {
+      addMark(e.pointerId, position);
+    }
     refreshPressedRegion();
   }
 
@@ -311,12 +423,24 @@ async function main($container) {
     }
     const position = pointerPosition(e);
     pointers.set(e.pointerId, position);
-    moveMark(e.pointerId, position);
+    if (gamepadActive()) {
+      const { layout, x, y } = gamepadPoint(e);
+      if (layout !== null) {
+        gamepad.move(layout, e.pointerId, x, y);
+        syncGamepad();
+      }
+    } else {
+      moveMark(e.pointerId, position);
+    }
     refreshPressedRegion();
   }
 
   function onPointerUp(e) {
     pointers.delete(e.pointerId);
+    if (gamepadActive()) {
+      gamepad.up(e.pointerId);
+      syncGamepad();
+    }
     // tap stays an immediate event rather than waiting for the next tick
     if (pointers.size === 0 && performance.now() - touchStartTime < TAP_MAX_DURATION) {
       player.set({ tap: true });
@@ -419,6 +543,11 @@ async function main($container) {
     if (global.get('streamRegion')) {
       addIfChanged(payload, 'region', regionAt(primary, global.get('touchSplit')));
     }
+    // Sticks ride the tick like `touch`: a continuous value, of which only the
+    // latest matters. Outside gamepad mode they sit at 0 and send nothing.
+    if (global.get('streamGamepad') && gamepadActive()) {
+      addIfChanged(payload, 'gamepadSticks', gamepad.sticks());
+    }
 
     // ## raw streams — mode-gated, and only what is enabled. Still one batched
     // update per tick, so this saves bytes; lower `sensorRate` to save packets.
@@ -503,19 +632,35 @@ async function main($container) {
     return label ? `${index} · ${label}` : String(index);
   }
 
+  // Labels as drawn on this phone's controller, then both sticks.
+  function formatGamepad() {
+    const style = global.get('gamepadStyle');
+    const names = pressedButtons(player.get('gamepadButtons'))
+      .map(name => buttonLabel(style, name));
+    const [lx, ly, rx, ry] = player.get('gamepadSticks').map(formatNumber);
+    return `${names.join(' ') || '—'}  L[${lx} ${ly}] R[${rx} ${ry}]`;
+  }
+
+  function formatRow(key) {
+    switch (key) {
+      case 'region':
+        return formatRegion(player.get('region'));
+      case 'gamepad':
+        return formatGamepad();
+      default:
+        return formatValue(player.get(key));
+    }
+  }
+
   function renderDataRow(row, running, mode) {
     // mirrors tick(): the toggle, the mode gate and the panic switch all have to
     // be open for the field to leave the phone
     const sending = running
       && global.get(row.stream)
-      && (row.modes === null || row.modes.includes(mode));
+      && (row.modes === null || row.modes.includes(mode))
+      && (row.surface === undefined || global.get('touchSurface') === row.surface);
 
-    let value = tt('dataOff');
-    if (sending) {
-      value = row.key === 'region'
-        ? formatRegion(player.get('region'))
-        : formatValue(player.get(row.key));
-    }
+    const value = sending ? formatRow(row.key) : tt('dataOff');
 
     return html`
       <li class="data-row ${sending ? '' : 'muted'}">
@@ -583,19 +728,69 @@ async function main($container) {
   // The sub-areas are painted by a grid *behind* the surface with
   // `pointer-events: none`, so the pointer handlers stay on the one parent
   // element and multi-touch tracking does not have to be split per cell.
+  // The gamepad is laid out in px against the element it is drawn in, so it
+  // needs that element's size before it can draw — and again on every rotation.
+  // Sizes come from a ResizeObserver rather than a read during render.
+  const surfaceSizes = new Map(); // data-surface -> [width, height]
+  const observed = new Set();
+  const resizeObserver = new ResizeObserver(entries => {
+    let changed = false;
+    for (const { target } of entries) {
+      const size = [target.clientWidth, target.clientHeight];
+      const previous = surfaceSizes.get(target.dataset.surface);
+      if (!previous || previous[0] !== size[0] || previous[1] !== size[1]) {
+        surfaceSizes.set(target.dataset.surface, size);
+        changed = true;
+      }
+    }
+    if (changed) {
+      invalidateGeometry();
+      renderApp();
+    }
+  });
+
+  function observeSurfaces() {
+    for (const $el of observed) {
+      if (!$el.isConnected) {
+        resizeObserver.unobserve($el);
+        observed.delete($el);
+      }
+    }
+    for (const $el of $container.querySelectorAll('[data-surface]')) {
+      if (!observed.has($el)) {
+        resizeObserver.observe($el);
+        observed.add($el);
+      }
+    }
+  }
+
+  // `highlight` as for renderRegionGrid(): the surface gates the pressed state
+  // on `touchFeedback`, the Data tab's pad always shows it.
+  function renderSurfaceContent(surface, highlight) {
+    if (!gamepadActive()) {
+      return renderRegionGrid(global.get('touchSplit'), highlight);
+    }
+    const [width, height] = surfaceSizes.get(surface) || [0, 0];
+    return renderGamepad(
+      layoutFor(width, height),
+      global.get('gamepadStyle'),
+      highlight ? gamepadMask : 0,
+    );
+  }
+
   function renderTouchSurface() {
     const text = global.get('touchText').trim();
 
     return html`
-      <div class="touch-surface"
+      <div class="touch-surface" data-surface="surface"
         @pointerdown="${onPointerDown}"
         @pointermove="${onPointerMove}"
         @pointerup="${onPointerUp}"
         @pointercancel="${onPointerUp}"
       >
-        ${renderRegionGrid(global.get('touchSplit'), global.get('touchFeedback'))}
+        ${renderSurfaceContent('surface', global.get('touchFeedback'))}
         <div class="touch-marks"></div>
-        <p class="touch-hint">${text || tt('touchHint')}</p>
+        ${gamepadActive() ? nothing : html`<p class="touch-hint">${text || tt('touchHint')}</p>`}
       </div>`;
   }
 
@@ -605,13 +800,13 @@ async function main($container) {
   // surface's corners.
   function renderDataTouchpad() {
     return html`
-      <div class="data-touchpad"
+      <div class="data-touchpad ${gamepadActive() ? 'gamepad-pad' : ''}" data-surface="pad"
         @pointerdown="${onPointerDown}"
         @pointermove="${onPointerMove}"
         @pointerup="${onPointerUp}"
         @pointercancel="${onPointerUp}"
       >
-        ${renderRegionGrid(global.get('touchSplit'), true)}
+        ${renderSurfaceContent('pad', true)}
       </div>`;
   }
 
@@ -627,6 +822,7 @@ async function main($container) {
     lastTouchTarget = target;
     pointers.clear();
     clearMarks();
+    releaseGamepad();
     pressedRegion = -1;
     // whatever the pointers were measured against is gone or replaced
     invalidateGeometry();
@@ -681,6 +877,7 @@ async function main($container) {
         </nav>
       </div>
     `, $container);
+    observeSurfaces();
   }
 
   // ## haptic cue
@@ -720,7 +917,17 @@ async function main($container) {
     if ('touchSplit' in updates) {
       refreshPressedRegion();
     }
+    // Fingers already down stay down — the touch data does not care what is
+    // drawn — but whatever they held on the old surface is let go: rings when
+    // the gamepad appears, buttons and sticks when it goes.
+    if ('touchSurface' in updates) {
+      clearMarks();
+      releaseGamepad();
+    }
     renderApp();
+    if (updates.touchFeedback === false) {
+      positionKnobs();
+    }
   });
 
   renderApp();
