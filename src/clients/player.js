@@ -15,19 +15,19 @@ import {
   regionCount,
 } from '../shared/touch-layout.js';
 
-// - General documentation: https://soundworks.dev/
-// - API documentation:     https://soundworks.dev/api
-
 const TAP_MAX_DURATION = 250; // ms
 // low-pass coefficient for the gravity estimate; ~0.5 s time constant at 60 Hz
 const GRAVITY_ALPHA = 0.03;
-// Hz the data tab re-renders at. Deliberately far below `sensorRate`: the panel
-// is for the audience to see itself in the stream, not a measurement tool, and
-// re-rendering at 100 Hz on a phone costs more than the sensors do.
+// Hz the data tab re-renders at, far below `sensorRate`: repainting at 100 Hz
+// on a phone costs more than the sensors do.
 const DATA_REFRESH_RATE = 10;
 // ms a released ring takes to fade out. Long enough to be seen on a phone held
 // at arm's length, short enough that a fast tap sequence does not pile up rings.
 const MARK_FADE_DURATION = 400;
+// Buzz length for a haptic cue. Short on purpose: the motor drives the
+// accelerometer this phone is streaming, so the cue lands in the signal being
+// recorded. A gesture follows a cue by 150–400 ms, so 40 ms does not overlap it.
+const CUE_MS = 40;
 
 // Rows of the data tab, in the order they are shown. `stream` names the global
 // per-stream toggle, `modes` the interaction modes in which the field is sent
@@ -74,13 +74,34 @@ function formatValue(value) {
   return formatNumber(value);
 }
 
+// Keeps the screen awake, re-acquiring when the page becomes visible again.
+function keepAwake() {
+  if (!('wakeLock' in navigator)) {
+    return;
+  }
+  let lock = null;
+
+  const acquire = async () => {
+    try {
+      lock = await navigator.wakeLock.request('screen');
+    } catch (err) {
+      console.warn('wakeLock denied:', err.message);
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && lock?.released !== false) {
+      acquire();
+    }
+  });
+  acquire();
+}
+
 async function main($container) {
   const config = loadConfig();
   const client = new Client(config);
 
-  client.pluginManager.register('platform-init', ClientPluginPlatformInit, {
-    devicemotion,
-  });
+  client.pluginManager.register('platform-init', ClientPluginPlatformInit, { devicemotion });
   client.pluginManager.register('checkin', ClientPluginCheckin);
 
   launcher.register(client, {
@@ -101,29 +122,12 @@ async function main($container) {
 
   const global = await client.stateManager.attach('global');
 
-  // ## screen wake lock, re-acquired when the page becomes visible again
-  let wakeLock = null;
-  async function acquireWakeLock() {
-    if (!('wakeLock' in navigator)) {
-      return;
-    }
-    try {
-      wakeLock = await navigator.wakeLock.request('screen');
-    } catch (err) {
-      console.warn('wakeLock denied:', err.message);
-    }
-  }
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && wakeLock?.released !== false) {
-      acquireWakeLock();
-    }
-  });
-  acquireWakeLock();
+  keepAwake();
 
   // ## sensors
-  // devicemotion events land at whatever rate the browser delivers (iOS
-  // Safari ~60 Hz); we buffer the latest frame and send at
-  // min(global.sensorRate, delivery rate) — one batched state update per tick.
+  // devicemotion events land at whatever rate the browser delivers (iOS Safari
+  // ~60 Hz); the latest frame is buffered here and sent at min(sensorRate,
+  // delivery rate) — one batched state update per tick.
   const frame = {
     accel: [0, 0, 0],
     // accel with gravity subtracted — what the shake/jab detectors run on
@@ -157,6 +161,180 @@ async function main($container) {
     frame.orientation = [e.alpha || 0, e.beta || 0, e.gamma || 0];
   });
 
+  // ## touch surface — multi-touch through pointer events. The CSS sets
+  // `touch-action: none`, so the browser hands us every finger instead of
+  // turning the second one into a pinch-zoom.
+  let touchStartTime = 0;
+  const pointers = new Map(); // pointerId -> [x, y]
+
+  // Positions are read by the tick, not pushed from the handlers: pointermove
+  // fires faster than we want to hit the network, and the tick already batches.
+  function activeTouches() {
+    return [...pointers.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .slice(0, global.get('maxTouches'))
+      .map(([, position]) => position);
+  }
+
+  // Cached because `pointerPosition` reads it on every pointermove and a layout
+  // read there is the one place this file can stall the frame. Keyed by element,
+  // since the full-screen surface and the Data tab's pad are both valid targets
+  // and each normalizes against its own box.
+  let cachedTarget = null;
+  let cachedRect = null;
+
+  function invalidateGeometry() {
+    cachedTarget = null;
+    cachedRect = null;
+  }
+
+  window.addEventListener('resize', invalidateGeometry);
+  window.addEventListener('orientationchange', invalidateGeometry);
+  // The Data tab scrolls, which moves the pad without resizing anything.
+  window.addEventListener('scroll', invalidateGeometry, true);
+
+  // Normalized against the element the pointer landed on, not the viewport. The
+  // surface stops above the tab bar, so viewport-relative coordinates put the
+  // seam of a `quad` half a tab bar away from where the audience sees it — and
+  // the pressed region would then disagree with the reported `region`.
+  function pointerPosition(e) {
+    if (cachedRect === null || cachedTarget !== e.currentTarget) {
+      cachedTarget = e.currentTarget;
+      cachedRect = e.currentTarget.getBoundingClientRect();
+    }
+    const rect = cachedRect;
+    // A zero-area rect would divide to NaN and put NaN on the wire, which is
+    // worse than a slightly wrong number in every downstream patch.
+    if (rect.width === 0 || rect.height === 0) {
+      return [0, 0];
+    }
+    return [
+      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    ];
+  }
+
+  // ## touch feedback — two signals, answering two questions.
+  // A ring under each finger and the pressed region dimmed: *the phone saw you*,
+  // immediate, from the pointer handler. The ring brightening: *that touch left
+  // the phone*, driven from `tick()` after `player.set()`, so a phone with every
+  // stream off shows contact without claiming to transmit.
+  // Both subtract light rather than add it — a few hundred of these screens are
+  // a light source inside the dome. `touchFeedback` switches them off.
+  const marks = new Map(); // pointerId -> ring element
+  // rings still waiting for a send to confirm them; an array so `tick()` can
+  // check for pending work with a length test instead of a DOM query
+  const pendingMarks = [];
+
+  function positionMark($mark, [x, y]) {
+    // left/top are the fingertip; the ring is pulled back onto it with negative
+    // margins in CSS, which leaves `transform` free for the confirm animation
+    $mark.style.left = `${x * 100}%`;
+    $mark.style.top = `${y * 100}%`;
+  }
+
+  function addMark(pointerId, position) {
+    const layer = global.get('touchFeedback') ? $container.querySelector('.touch-marks') : null;
+    if (layer === null) {
+      return;
+    }
+    const $mark = document.createElement('div');
+    $mark.className = 'touch-mark';
+    positionMark($mark, position);
+    layer.appendChild($mark);
+    marks.set(pointerId, $mark);
+    pendingMarks.push($mark);
+  }
+
+  function moveMark(pointerId, position) {
+    const $mark = marks.get(pointerId);
+    if ($mark !== undefined) {
+      positionMark($mark, position);
+    }
+  }
+
+  function releaseMark(pointerId) {
+    const $mark = marks.get(pointerId);
+    if ($mark === undefined) {
+      return;
+    }
+    marks.delete(pointerId);
+    $mark.classList.add('released');
+    setTimeout(() => $mark.remove(), MARK_FADE_DURATION);
+  }
+
+  // Called once a payload has actually gone out.
+  function confirmMarks() {
+    for (const $mark of pendingMarks) {
+      $mark.classList.add('sent');
+    }
+    pendingMarks.length = 0;
+  }
+
+  function clearMarks() {
+    for (const $mark of marks.values()) {
+      $mark.remove();
+    }
+    marks.clear();
+    pendingMarks.length = 0;
+  }
+
+  // The pressed region goes through lit rather than the DOM: it changes on press
+  // and on crossing a seam, not on every pointermove, so a render is affordable
+  // here in a way it is not for the rings.
+  let pressedRegion = -1;
+
+  function refreshPressedRegion() {
+    const touches = activeTouches();
+    const next = regionAt(touches.length > 0 ? touches[0] : null, global.get('touchSplit'));
+    if (next !== pressedRegion) {
+      pressedRegion = next;
+      renderApp();
+    }
+  }
+
+  function onPointerDown(e) {
+    e.preventDefault();
+    if (pointers.size === 0) {
+      touchStartTime = performance.now();
+    }
+    const position = pointerPosition(e);
+    pointers.set(e.pointerId, position);
+    addMark(e.pointerId, position);
+    refreshPressedRegion();
+  }
+
+  function onPointerMove(e) {
+    // no entry means this pointer is hovering, not pressed
+    if (!pointers.has(e.pointerId)) {
+      return;
+    }
+    const position = pointerPosition(e);
+    pointers.set(e.pointerId, position);
+    moveMark(e.pointerId, position);
+    refreshPressedRegion();
+  }
+
+  function onPointerUp(e) {
+    pointers.delete(e.pointerId);
+    // tap stays an immediate event rather than waiting for the next tick
+    if (pointers.size === 0 && performance.now() - touchStartTime < TAP_MAX_DURATION) {
+      player.set({ tap: true });
+      // `tap` is an event descriptor, so it has no readable current value —
+      // count locally for the data tab
+      tapCount += 1;
+      // That write is a send like any other, and it beats the tick whenever
+      // `sensorRate` is low — confirm here or a tap on a 2 Hz phone fades out
+      // having never brightened.
+      if (pendingMarks.length > 0) {
+        confirmMarks();
+      }
+    }
+    // after the tap, so a confirmed ring is what fades out
+    releaseMark(e.pointerId);
+    refreshPressedRegion();
+  }
+
   // ## gesture descriptors
   function gestureParams() {
     const params = {};
@@ -189,8 +367,7 @@ async function main($container) {
 
   function startSensorLoop() {
     clearInterval(sensorTimer);
-    const rate = global.get('sensorRate');
-    sensorTimer = setInterval(tick, 1000 / rate);
+    sensorTimer = setInterval(tick, 1000 / global.get('sensorRate'));
   }
 
   function tick() {
@@ -292,195 +469,6 @@ async function main($container) {
     reportBattery();
   }
 
-  // ## touch surface — multi-touch through pointer events. The CSS sets
-  // `touch-action: none`, so the browser hands us every finger instead of
-  // turning the second one into a pinch-zoom.
-  let touchStartTime = 0;
-  const pointers = new Map(); // pointerId -> [x, y]
-
-  // Positions are read by the tick, not pushed from the handlers: pointermove
-  // fires faster than we want to hit the network, and the tick already batches.
-  function activeTouches() {
-    const max = global.get('maxTouches');
-    return [...pointers.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .slice(0, max)
-      .map(([, position]) => position);
-  }
-
-  // Cached because `pointerPosition` reads it on every pointermove and a layout
-  // read there is the one place this file can stall the frame. Keyed by element,
-  // since the full-screen surface and the Data tab's pad are both valid targets
-  // and each normalizes against its own box. Invalidated whenever the viewport
-  // changes or a render (re)mounts the element.
-  let cachedTarget = null;
-  let cachedRect = null;
-
-  function surfaceGeometry(target) {
-    if (cachedRect === null || cachedTarget !== target) {
-      cachedTarget = target;
-      cachedRect = target.getBoundingClientRect();
-    }
-    return cachedRect;
-  }
-
-  function invalidateGeometry() {
-    cachedTarget = null;
-    cachedRect = null;
-  }
-
-  window.addEventListener('resize', invalidateGeometry);
-  window.addEventListener('orientationchange', invalidateGeometry);
-  // The Data tab scrolls, which moves the pad without resizing anything.
-  window.addEventListener('scroll', invalidateGeometry, true);
-
-  // Normalized against the element the pointer landed on, not the viewport. The
-  // surface stops above the tab bar, so viewport-relative coordinates put the
-  // seam of a `quad` half a tab bar away from where the audience sees it —
-  // tolerable while nothing on screen reacted to a touch, wrong now that the
-  // pressed region lights up and would disagree with the reported `region`.
-  function pointerPosition(e) {
-    const rect = surfaceGeometry(e.currentTarget);
-    // A zero-area rect would divide to NaN and put NaN on the wire, which is
-    // worse than a slightly wrong number in every downstream patch.
-    if (rect.width === 0 || rect.height === 0) {
-      return [0, 0];
-    }
-    return [
-      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
-    ];
-  }
-
-  function onPointerDown(e) {
-    e.preventDefault();
-    if (pointers.size === 0) {
-      touchStartTime = performance.now();
-    }
-    pointers.set(e.pointerId, pointerPosition(e));
-    addMark(e.pointerId, pointers.get(e.pointerId));
-    refreshPressedRegion();
-  }
-
-  function onPointerMove(e) {
-    // no entry means this pointer is hovering, not pressed
-    if (!pointers.has(e.pointerId)) {
-      return;
-    }
-    pointers.set(e.pointerId, pointerPosition(e));
-    moveMark(e.pointerId, pointers.get(e.pointerId));
-    refreshPressedRegion();
-  }
-
-  function onPointerUp(e) {
-    pointers.delete(e.pointerId);
-    // tap stays an immediate event rather than waiting for the next tick
-    if (pointers.size === 0 && performance.now() - touchStartTime < TAP_MAX_DURATION) {
-      player.set({ tap: true });
-      // `tap` is an event descriptor, so it has no readable current value —
-      // count locally for the data tab
-      tapCount += 1;
-      // That write is a send like any other, and it beats the tick whenever
-      // `sensorRate` is low — confirm here or a tap on a 2 Hz phone fades out
-      // having never brightened.
-      if (pendingMarks.length > 0) {
-        confirmMarks();
-      }
-    }
-    // after the tap, so a confirmed ring is what fades out
-    releaseMark(e.pointerId);
-    refreshPressedRegion();
-  }
-
-  // ## touch feedback
-  // What the audience gets back for touching the glass. Two separate signals,
-  // because they answer two different questions:
-  //
-  // - a ring under each finger, and the pressed region dimmed: *the phone saw
-  //   you*. Immediate, from the pointer handler.
-  // - the ring brightening: *that touch left the phone*. Driven from `tick()`
-  //   after `player.set()`, so a phone whose streams are all switched off shows
-  //   contact without ever claiming to transmit.
-  //
-  // Sized and coloured to subtract light rather than add it (hairline ring, the
-  // region gets darker) because a few hundred of these screens are a light
-  // source inside the dome. `touchFeedback` switches the whole thing off.
-  const marks = new Map(); // pointerId -> ring element
-  // rings still waiting for a send to confirm them; an array so `tick()` can
-  // check for pending work with a length test instead of a DOM query
-  const pendingMarks = [];
-
-  function marksLayer() {
-    return $container.querySelector('.touch-marks');
-  }
-
-  function positionMark($mark, [x, y]) {
-    // left/top are the fingertip; the ring is pulled back onto it with negative
-    // margins in CSS, which leaves `transform` free for the confirm animation
-    $mark.style.left = `${x * 100}%`;
-    $mark.style.top = `${y * 100}%`;
-  }
-
-  function addMark(pointerId, position) {
-    const layer = global.get('touchFeedback') ? marksLayer() : null;
-    if (layer === null) {
-      return;
-    }
-    const $mark = document.createElement('div');
-    $mark.className = 'touch-mark';
-    positionMark($mark, position);
-    layer.appendChild($mark);
-    marks.set(pointerId, $mark);
-    pendingMarks.push($mark);
-  }
-
-  function moveMark(pointerId, position) {
-    const $mark = marks.get(pointerId);
-    if ($mark !== undefined) {
-      positionMark($mark, position);
-    }
-  }
-
-  function releaseMark(pointerId) {
-    const $mark = marks.get(pointerId);
-    if ($mark === undefined) {
-      return;
-    }
-    marks.delete(pointerId);
-    $mark.classList.add('released');
-    setTimeout(() => $mark.remove(), MARK_FADE_DURATION);
-  }
-
-  // Called from `tick()` once a payload has actually gone out.
-  function confirmMarks() {
-    for (const $mark of pendingMarks) {
-      $mark.classList.add('sent');
-    }
-    pendingMarks.length = 0;
-  }
-
-  function clearMarks() {
-    for (const $mark of marks.values()) {
-      $mark.remove();
-    }
-    marks.clear();
-    pendingMarks.length = 0;
-  }
-
-  // The pressed region goes through lit rather than the DOM: it changes on press
-  // and on crossing a seam, not on every pointermove, so a render is affordable
-  // here in a way it is not for the rings.
-  let pressedRegion = -1;
-
-  function refreshPressedRegion() {
-    const touches = activeTouches();
-    const next = regionAt(touches.length > 0 ? touches[0] : null, global.get('touchSplit'));
-    if (next !== pressedRegion) {
-      pressedRegion = next;
-      renderApp();
-    }
-  }
-
   // ## rendering
   let activeTab = 'play';
   let tapCount = 0;
@@ -515,6 +503,28 @@ async function main($container) {
     return label ? `${index} · ${label}` : String(index);
   }
 
+  function renderDataRow(row, running, mode) {
+    // mirrors tick(): the toggle, the mode gate and the panic switch all have to
+    // be open for the field to leave the phone
+    const sending = running
+      && global.get(row.stream)
+      && (row.modes === null || row.modes.includes(mode));
+
+    let value = tt('dataOff');
+    if (sending) {
+      value = row.key === 'region'
+        ? formatRegion(player.get('region'))
+        : formatValue(player.get(row.key));
+    }
+
+    return html`
+      <li class="data-row ${sending ? '' : 'muted'}">
+        <span class="data-label">${row.label}</span>
+        <span class="data-value">${value}</span>
+        <span class="data-unit">${sending ? row.unit : ''}</span>
+      </li>`;
+  }
+
   function renderDataPanel() {
     const running = global.get('running');
     const mode = global.get('interactionMode');
@@ -531,27 +541,7 @@ async function main($container) {
           <li>tap: ${tapCount}</li>
         </ul>
         <ul class="data-rows">
-          ${DATA_ROWS.map(row => {
-            // "sending" mirrors tick(): the toggle, the mode gate and the panic
-            // switch all have to be open for the field to leave the phone
-            const sending = running
-              && global.get(row.stream)
-              && (row.modes === null || row.modes.includes(mode));
-
-            return html`
-              <li class="data-row ${sending ? '' : 'muted'}">
-                <span class="data-label">${row.label}</span>
-                <span class="data-value">
-                  ${!sending
-                    ? tt('dataOff')
-                    : row.key === 'region'
-                      ? formatRegion(player.get('region'))
-                      : formatValue(player.get(row.key))
-                  }
-                </span>
-                <span class="data-unit">${sending ? row.unit : ''}</span>
-              </li>`;
-          })}
+          ${DATA_ROWS.map(row => renderDataRow(row, running, mode))}
         </ul>
         ${running
           // Only while the show is running: `tick()` is gated on it, so a pad
@@ -565,12 +555,10 @@ async function main($container) {
       </section>`;
   }
 
-  // The painted sub-areas, shared by the full-screen surface and the Data tab's
-  // touchpad. One renderer on purpose: the pad exists to show what the surface
-  // sends, which it can only do honestly if both lay their regions out
-  // identically. `highlight` is the pressed-region dim, which the surface gates
-  // on `touchFeedback` and the pad does not — the pad *is* an inspection view,
-  // and a dim subtracts light from the dome rather than adding it.
+  // Shared by the full-screen surface and the Data tab's pad: the pad shows what
+  // the surface sends, which it can only do honestly if both lay out identically.
+  // `highlight` is the pressed-region dim — the surface gates it on
+  // `touchFeedback`, the pad does not, being an inspection view.
   function renderRegionGrid(split, highlight) {
     const { cols, rows } = gridGeometry(split);
     const regions = normalizeRegions(global.get('touchRegions'))
@@ -611,12 +599,10 @@ async function main($container) {
       </div>`;
   }
 
-  // A miniature of the surface at the foot of the Data tab, so the values above
-  // can be watched while something is actually touching. The same handlers, so
-  // this sends for real — that is the point: what the rows show is what left the
-  // phone, whichever surface produced it. Coordinates normalize to whichever
-  // element the pointer landed on, so a corner of the pad reads as that corner
-  // of the full surface and `region` agrees with the cell under the finger.
+  // A miniature of the surface at the foot of the Data tab, so the rows above can
+  // be watched while something is touching. The same handlers, so it sends for
+  // real; coordinates normalize against the pad, so its corners read as the
+  // surface's corners.
   function renderDataTouchpad() {
     return html`
       <div class="data-touchpad"
@@ -629,39 +615,40 @@ async function main($container) {
       </div>`;
   }
 
-  // Which element is taking touches, so a swap can be noticed: changing tab or a
-  // panic mid-touch removes the element without a pointerup, which would
-  // otherwise leave the phone reporting a finger it can no longer see. Both tabs
-  // accept touches now — the Play tab through the full surface, the Data tab
-  // through its pad — so this tracks which one rather than whether.
+  // Which element is taking touches. Changing tab or a panic mid-touch removes
+  // the element without a pointerup, which would otherwise leave the phone
+  // reporting a finger it can no longer see.
   let lastTouchTarget = 'none';
+
+  function syncTouchTarget(target) {
+    if (target === lastTouchTarget) {
+      return;
+    }
+    lastTouchTarget = target;
+    pointers.clear();
+    clearMarks();
+    pressedRegion = -1;
+    // whatever the pointers were measured against is gone or replaced
+    invalidateGeometry();
+  }
+
+  function statusKey(running, scene) {
+    if (scene === 'end') {
+      return 'over';
+    }
+    return running ? 'active' : 'waiting';
+  }
 
   function renderApp() {
     const running = global.get('running');
-    const scene = global.get('scene');
     // the surface is needed in every mode: tap is an event, emitted always
     const touchEnabled = running && activeTab === 'play';
+
     let touchTarget = 'none';
     if (running) {
       touchTarget = activeTab === 'play' ? 'surface' : 'pad';
     }
-
-    if (touchTarget !== lastTouchTarget) {
-      pointers.clear();
-      clearMarks();
-      pressedRegion = -1;
-      // whatever the pointers were measured against is gone or replaced
-      invalidateGeometry();
-      lastTouchTarget = touchTarget;
-    }
-
-    let statusKey = 'waiting';
-    if (running) {
-      statusKey = 'active';
-    }
-    if (scene === 'end') {
-      statusKey = 'over';
-    }
+    syncTouchTarget(touchTarget);
 
     render(html`
       <div class="player-layout">
@@ -674,13 +661,12 @@ async function main($container) {
           ${activeTab === 'data'
             ? renderDataPanel()
             : touchEnabled
-              // The surface covers this message completely, so rendering it puts
-              // text nobody can read behind an opaque overlay — except for the
-              // sliver a region seam exposes, which is how a stray glyph ended
-              // up in the middle of the screen. The surface carries its own
-              // headline (`touchHint`); this one is for when there is no surface.
+              // The surface covers this completely and carries its own headline,
+              // so rendering it only leaks glyphs through the region seams.
               ? nothing
-              : html`<p class="status-message">${tt(statusKey)}</p>`
+              : html`<p class="status-message">
+                  ${tt(statusKey(running, global.get('scene')))}
+                </p>`
           }
         </main>
         <nav class="tab-bar">
@@ -698,38 +684,22 @@ async function main($container) {
   }
 
   // ## haptic cue
+  // Forwarded from a recording tool (docs/NAMESPACE.md, "Inbound control"). At
+  // the instrument rather than on screen: a visual cue adds display and
+  // eye-to-hand latency to the reaction time it is measuring.
   //
-  // A cue forwarded from a recording tool (docs/NAMESPACE.md, "Inbound
-  // control"). Delivering it at the instrument rather than on screen is the
-  // point: a visual cue adds display and eye-to-hand latency to the error term
-  // that already dominates the measurement it feeds.
-  //
-  // CUE_MS is short on purpose. The motor drives the accelerometer this phone is
-  // streaming, so the buzz appears in the very signal being recorded, at the
-  // instant the label is anchored to. A gesture follows a cue by 150–400 ms, so
-  // a 40 ms artefact does not overlap it, but it is a large energy spike near
-  // the start of the labelling window and a shorter one is a smaller lie.
-  // iOS Safari implements no Vibration API at all, so an iPhone cannot receive a
-  // haptic cue and the session has to fall back to an audible one for it. That is
-  // a fact about the room, decided before anyone starts recording, so say it once
-  // at startup rather than on every cue.
-  const CUE_MS = 40;
+  // iOS Safari has no Vibration API, so an iPhone needs an audible fallback —
+  // a fact about the room, so say it once at startup rather than on every cue.
   const canVibrate = typeof navigator.vibrate === 'function';
   if (!canVibrate) {
     console.warn('no Vibration API on this device — haptic cues will not be felt here');
   }
 
-  function deliverCue() {
-    if (canVibrate) {
-      navigator.vibrate(CUE_MS);
-    }
-  }
-
   global.onUpdate(updates => {
-    // First, and outside the render batching below: this is a stimulus whose
-    // arrival time is the measurement.
-    if ('cue' in updates && updates.cue !== null) {
-      deliverCue();
+    // First, and outside the render below: this is a stimulus whose arrival time
+    // is the measurement.
+    if (canVibrate && updates.cue != null) {
+      navigator.vibrate(CUE_MS);
     }
     if ('sensorRate' in updates) {
       startSensorLoop();

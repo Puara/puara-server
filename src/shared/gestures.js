@@ -8,11 +8,11 @@
 //   include/puara/descriptors/brushRub.h
 //   include/puara/descriptors/button.h
 //
-// Arithmetic, constants and state-machine order follow the C++ line by line.
-// Two deliberate deviations, both marked DEVIATION below: the C++ zeroes a
+// Arithmetic, constants and state-machine order follow the C++ line by line,
+// with two deliberate exceptions marked DEVIATION below: the C++ zeroes a
 // descriptor's output without zeroing the integrator behind it, so the next
-// sample resurrects the old value from `old_value`. Reaching a true 0 when the
-// gesture stops is the whole point here, so both are reset together.
+// sample resurrects the old value. Reaching a true 0 when the gesture stops is
+// the point here, so both are reset together.
 //
 // `now` is milliseconds from a monotonic clock (`performance.now()`), passed in
 // rather than read internally so callers can drive these at a fixed tick.

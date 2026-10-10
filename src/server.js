@@ -15,11 +15,6 @@ import {
 } from './shared/schemas.js';
 import { loadPuaraConfig } from './shared/load-puara-config.js';
 
-// - General documentation: https://soundworks.dev/
-// - API documentation:     https://soundworks.dev/api
-// - Issue Tracker:         https://github.com/collective-soundworks/soundworks/issues
-// - Wizard & Tools:        `npx soundworks`
-
 const config = loadConfig(process.env.ENV, import.meta.url);
 const puara = loadPuaraConfig();
 
@@ -49,10 +44,10 @@ await server.start();
 const { useHttps, port, serverAddress } = server.config.env;
 const protocol = useHttps ? 'https' : 'http';
 
-// The QR codes must point at an address a phone can reach, which is never the
+// QR codes must point at an address a phone can reach, which is never the
 // dashboard's own origin when the operator opens it on localhost. Prefer the
-// configured public address (a hostname behind a real certificate), then the
-// configured serverAddress, then the first non-internal IPv4 interface.
+// configured public address, then serverAddress, then the first non-internal
+// IPv4 interface.
 function detectLanAddress() {
   for (const addresses of Object.values(networkInterfaces())) {
     for (const address of addresses || []) {

@@ -1,23 +1,19 @@
 // The bridge between puara-server and the real puara-gestures C++ library.
 //
-// This branch (`gesture-tester`) exists to exercise that library against live
-// phones. `src/shared/gestures.js` stays exactly as it is: the phones keep
-// computing the JS ports and emitting them under `/puara/audience/...`, and the
-// C++ descriptors are emitted in parallel under `/puara/gestures/...` from the
-// same input. Two implementations, one gesture, side by side in `oscdump` — the
-// comparison is the point, so neither replaces the other.
+// The phones keep computing the JS ports of src/shared/gestures.js and emitting
+// them under `/puara/audience/...`; the C++ descriptors go out in parallel under
+// `/puara/gestures/...` from the same input. Two implementations of one gesture,
+// side by side in `oscdump` — the comparison is the point of this branch, so
+// neither replaces the other.
 //
-// This module is imported by the browser dashboard as well as the node bridge,
-// so it stays free of node builtins. Loading the addon itself lives in
-// src/shared/native-addon.js, which only the bridge imports.
+// Imported by the browser dashboard as well as the node bridge, so no node
+// builtins here. Loading the addon lives in src/shared/native-addon.js.
 
 export const NATIVE_ROOT = '/puara/gestures';
 
-
 // Tunables surfaced to the dashboard. `key` is what the addon's setParams()
-// reads; ranges are what makes sense for a phone reporting m/s^2 and deg/s, and
-// are wider than the useful range on purpose — finding the useful range is what
-// this branch is for.
+// reads. Ranges are wider than the useful range on purpose — finding the useful
+// range is what this branch is for.
 export const NATIVE_PARAMS = [
   { key: 'impactThreshold', label: 'impact: threshold (m/s²)', min: 0, max: 60, step: 0.5, default: 18 },
   { key: 'impactReleaseThreshold', label: 'impact: release', min: 0, max: 60, step: 0.5, default: 12 },
@@ -51,9 +47,8 @@ export const NATIVE_PARAM_DEFAULTS = Object.fromEntries(
 const MOMENTARY = new Set(['strike', 'onset', 'offset', 'landed', 'tap', 'doubleTap', 'tripleTap']);
 
 // Walks whatever the addon returned into flat OSC-ready entries. Deliberately
-// generic: a descriptor added to the C++ side shows up here as soon as the addon
-// reports it, with no table to keep in step. `path` is the address after the
-// player id, `values` the message arguments.
+// generic: a descriptor added to the C++ side shows up as soon as the addon
+// reports it, with no table here to keep in step.
 export function flatten(outputs, prefix = []) {
   const entries = [];
 

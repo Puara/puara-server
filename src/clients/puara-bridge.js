@@ -16,81 +16,76 @@ import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
 import { flatten, nativeAddress, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { loadAddon } from '../shared/native-addon.js';
 
-// - General documentation: https://soundworks.dev/
-// - API documentation:     https://soundworks.dev/api
-
 // node-osc infers OSC types from JS values; whole floats would be encoded as
 // int32, so the contract types (docs/NAMESPACE.md) are forced explicitly.
 const f = value => ({ type: 'float', value });
 const i = value => ({ type: 'integer', value });
 
 const TAP_WINDOW = 2; // s, sliding window for tap rate descriptors
+const NATIVE_REPORT_RATE = 10; // Hz, dashboard readout of the C++ descriptors
+const SEQ_WRAP = 2 ** 31;
 
-async function bootstrap() {
-  const config = loadConfig(process.env.ENV, import.meta.url);
-  const client = new Client(config);
+// Per-device vector fields that need nothing but a toggle and an address.
+// `emitRaw` gates the raw sensors; the descriptors are the cheap representation
+// raw streams get switched off in favour of, so they are never gated by it.
+const RAW_STREAMS = [
+  { key: 'accel', toggle: 'streamAccel', address: device.accel },
+  { key: 'gyro', toggle: 'streamGyro', address: device.gyro },
+  { key: 'orientation', toggle: 'streamOrientation', address: device.orientation },
+  { key: 'touch', toggle: 'streamTouch', address: device.touch },
+];
 
-  launcher.register(client);
+const DESCRIPTOR_STREAMS = [
+  { key: 'shake', toggle: 'streamShake', address: device.shake },
+  { key: 'jab', toggle: 'streamJab', address: device.jab },
+  { key: 'brush', toggle: 'streamBrush', address: device.brush },
+  { key: 'rub', toggle: 'streamRub', address: device.rub },
+];
 
-  await client.start();
-
-  const puara = loadPuaraConfig();
-  const globalState = await client.stateManager.attach('global');
-  const players = await client.stateManager.getCollection('player');
-
-  const bridgeStatus = await client.stateManager.create('bridge-status', {
-    online: true,
-    destinations: puara.oscDestinations,
-  });
-
-  const oscClients = puara.oscDestinations.map(({ host, port }) => {
+// Outbound OSC, decoupled from state callbacks through a queue flushed at
+// bridgeTick so a slow socket never backpressures state handling.
+//
+// Per-device messages can carry a sequence number and a sample time, under the
+// `timestamps` toggle (namespace 0.4.0). Stamped at enqueue rather than at
+// flush: the queue drains on the tick timer, so a flush-time stamp would give
+// every message in a tick the same time and quantise onto a 33 ms grid — the
+// error this exists to remove. The clock is monotonic from the bridge's own
+// start, because NTP can step the wall clock backwards mid-session and a
+// recorder differencing these would read a negative interval as real.
+function createOscQueue(destinations, timestampsEnabled) {
+  const clients = destinations.map(({ host, port }) => {
     console.log(`> OSC destination: ${host}:${port}`);
     return new OscClient(host, port);
   });
 
-  // OSC emission is decoupled from state callbacks through a queue flushed at
-  // bridgeTick, so a slow socket never backpressures state handling.
+  const timeOrigin = process.hrtime.bigint();
+  // Never cleared, including when a phone leaves: keyed by address, and a
+  // reconnecting phone whose counter restarted would look to a recorder like a
+  // large reordering rather than an absence (`/status 0`/`1` already bracket the
+  // gap). Bounded by the id space — a few thousand entries at maxClients.
+  const sequence = new Map();
+
   let queue = [];
   let sentCount = 0;
   let lastSend = 0;
 
-  // Aggregates, meta and anything else that is not a per-device sample. These
-  // are computed at the tick and have no sample time to report, so they are
-  // never stamped — per-device messages go through enqueueDevice() below.
+  // Aggregates, meta, anything computed at the tick: no sample time to report,
+  // so never stamped.
   function enqueue(address, ...args) {
     queue.push([address, ...args]);
   }
-
-  // ## sample timestamps, under the `timestamps` toggle (namespace 0.4.0)
-  //
-  // Stamped here, at enqueue, and deliberately not in flush(): the queue is
-  // drained by the bridgeTick timer, so a flush-time stamp would hand every
-  // message in a tick the same time and quantise sample times onto a 33 ms
-  // grid — which is the whole error this exists to remove.
-  //
-  // The clock is monotonic and its epoch is the bridge's own start, not the
-  // wall clock: NTP can step the wall clock backwards mid-session, and a
-  // recorder differencing these would read a negative interval as real.
-  // Counters are never cleared, including when a phone leaves: they are keyed
-  // by address, ids are reused, and a reconnecting phone whose counter restarts
-  // would look to a recorder like a large reordering rather than an absence.
-  // `/status 0` and `/status 1` already bracket the gap. Growth is bounded by
-  // the id space, a few thousand entries at maxClients.
-  const timeOrigin = process.hrtime.bigint();
-  const SEQ_WRAP = 2 ** 31;
-  const deviceSeq = new Map(); // per-device address -> next sequence number
 
   // The time is split across two 32-bit integers rather than sent as a 64-bit
   // `h`, because node-osc cannot encode one: lib/osc.mjs handles i f s b m N
   // only, and its `d` silently narrows to float32. Whole seconds plus
   // microseconds within the second is exact, and it does not wrap.
   function enqueueDevice(address, ...args) {
-    if (globalState.get('timestamps') === 'off') {
+    if (!timestampsEnabled()) {
       enqueue(address, ...args);
       return;
     }
-    const seq = deviceSeq.get(address) ?? 0;
-    deviceSeq.set(address, (seq + 1) % SEQ_WRAP);
+    const seq = sequence.get(address) ?? 0;
+    sequence.set(address, (seq + 1) % SEQ_WRAP);
 
     const elapsed = (process.hrtime.bigint() - timeOrigin) / 1000n; // ns -> us
     enqueue(
@@ -109,7 +104,7 @@ async function bootstrap() {
     const batch = queue;
     queue = [];
     for (const message of batch) {
-      for (const osc of oscClients) {
+      for (const osc of clients) {
         osc.send(message, () => {});
       }
       sentCount += 1;
@@ -117,29 +112,76 @@ async function bootstrap() {
     lastSend = Date.now();
   }
 
+  // messages sent since the last call, for the dashboard's 1 Hz health readout
+  function drainStats() {
+    const stats = { oscRate: sentCount, lastSend };
+    sentCount = 0;
+    return stats;
+  }
+
+  return { enqueue, enqueueDevice, flush, drainStats };
+}
+
+async function bootstrap() {
+  const config = loadConfig(process.env.ENV, import.meta.url);
+  const client = new Client(config);
+
+  launcher.register(client);
+  await client.start();
+
+  const puara = loadPuaraConfig();
+  const globalState = await client.stateManager.attach('global');
+  const players = await client.stateManager.getCollection('player');
+
+  const bridgeStatus = await client.stateManager.create('bridge-status', {
+    online: true,
+    destinations: puara.oscDestinations,
+  });
+
+  const { enqueue, enqueueDevice, flush, drainStats } = createOscQueue(
+    puara.oscDestinations,
+    () => globalState.get('timestamps') !== 'off',
+  );
+
   // ## per-device: raw streams + events
   const tapLog = []; // [time, zone] pairs within TAP_WINDOW
 
+  // Each address is its own datagram, so a disabled stream removes messages
+  // one-for-one here. The players already skip it; this also covers states fed
+  // from elsewhere and updates in flight when a toggle flips.
+  function emitStreams(id, updates, streams) {
+    for (const { key, toggle, address } of streams) {
+      const value = updates[key];
+      if (value == null || !globalState.get(toggle)) {
+        continue;
+      }
+      enqueueDevice(address(id), ...value.map(f));
+    }
+  }
+
+  function emitButton(id, button) {
+    // tap/dtap/ttap are high for a single tick — emit them as bangs rather than
+    // streaming the zeros in between
+    if (button.tap) {
+      enqueueDevice(device.buttonTap(id), i(1));
+    }
+    if (button.dtap) {
+      enqueueDevice(device.buttonDtap(id), i(1));
+    }
+    if (button.ttap) {
+      enqueueDevice(device.buttonTtap(id), i(1));
+    }
+    enqueueDevice(device.buttonCount(id), i(button.count));
+    enqueueDevice(device.buttonPress(id), i(button.press ? 1 : 0));
+    enqueueDevice(device.buttonHold(id), i(button.hold ? 1 : 0));
+    enqueueDevice(device.buttonPressTime(id), f(button.pressTime));
+  }
+
   players.onUpdate((player, updates) => {
     const id = player.get('id');
-    const emitRaw = globalState.get('emitRaw');
 
-    // each address is its own datagram, so a disabled stream removes messages
-    // one-for-one here — the players already skip it, this also covers states
-    // fed from elsewhere and updates in flight when a toggle flips.
-    if (emitRaw) {
-      if ('accel' in updates && globalState.get('streamAccel')) {
-        enqueueDevice(device.accel(id), ...updates.accel.map(f));
-      }
-      if ('gyro' in updates && globalState.get('streamGyro')) {
-        enqueueDevice(device.gyro(id), ...updates.gyro.map(f));
-      }
-      if ('orientation' in updates && globalState.get('streamOrientation')) {
-        enqueueDevice(device.orientation(id), ...updates.orientation.map(f));
-      }
-      if ('touch' in updates && updates.touch !== null && globalState.get('streamTouch')) {
-        enqueueDevice(device.touch(id), ...updates.touch.map(f));
-      }
+    if (globalState.get('emitRaw')) {
+      emitStreams(id, updates, RAW_STREAMS);
       // multi-touch: count always, then one address per pointer
       if ('touches' in updates && globalState.get('streamTouch')) {
         enqueueDevice(device.touchCount(id), i(updates.touches.length));
@@ -149,59 +191,23 @@ async function bootstrap() {
       }
     }
 
-    // ## gesture descriptors — emitted in every interaction mode, like events.
-    // `emitRaw` does not gate these: they are already the cheap, scalable
-    // representation raw streams get switched off in favour of.
-    if ('shake' in updates && globalState.get('streamShake')) {
-      enqueueDevice(device.shake(id), ...updates.shake.map(f));
-    }
-    if ('jab' in updates && globalState.get('streamJab')) {
-      enqueueDevice(device.jab(id), ...updates.jab.map(f));
-    }
-    if ('brush' in updates && globalState.get('streamBrush')) {
-      enqueueDevice(device.brush(id), ...updates.brush.map(f));
-    }
-    if ('rub' in updates && globalState.get('streamRub')) {
-      enqueueDevice(device.rub(id), ...updates.rub.map(f));
-    }
-    if ('button' in updates && updates.button !== null && globalState.get('streamButton')) {
-      const button = updates.button;
-      // tap/dtap/ttap are high for a single tick — emit them as bangs rather
-      // than streaming the zeros in between
-      if (button.tap) {
-        enqueueDevice(device.buttonTap(id), i(1));
-      }
-      if (button.dtap) {
-        enqueueDevice(device.buttonDtap(id), i(1));
-      }
-      if (button.ttap) {
-        enqueueDevice(device.buttonTtap(id), i(1));
-      }
-      enqueueDevice(device.buttonCount(id), i(button.count));
-      enqueueDevice(device.buttonPress(id), i(button.press ? 1 : 0));
-      enqueueDevice(device.buttonHold(id), i(button.hold ? 1 : 0));
-      enqueueDevice(device.buttonPressTime(id), f(button.pressTime));
-    }
+    emitStreams(id, updates, DESCRIPTOR_STREAMS);
 
+    if (updates.button != null && globalState.get('streamButton')) {
+      emitButton(id, updates.button);
+    }
     if ('region' in updates && globalState.get('streamRegion')) {
       enqueueDevice(device.region(id), i(updates.region));
     }
-
     // events always pass, whatever the mode — they are what scales
-    if ('tap' in updates && updates.tap) {
+    if (updates.tap) {
       tapLog.push([Date.now(), player.get('zone')]);
       enqueueDevice(device.tap(id), i(1));
     }
-    // shake is no longer an event: it is emitted as continuous 3-axis energy in
-    // the descriptor block above.
   });
 
   players.onAttach(player => {
     enqueueDevice(device.status(player.get('id')), i(1));
-    enqueue(meta.connected(), i(players.size));
-  });
-  players.onDetach(player => {
-    enqueueDevice(device.status(player.get('id')), i(0));
     enqueue(meta.connected(), i(players.size));
   });
 
@@ -215,9 +221,6 @@ async function bootstrap() {
     const zones = {};
     let globalEnergy = 0;
     let touchCount = 0;
-    // Always MAX_REGIONS wide, not `regionCount(split)`: a piece binds to a
-    // stable set of addresses, and the ones the current split retires have to
-    // be driven to 0 rather than left unsent — see the emit below.
     const activeRegions = regionCount(globalState.get('touchSplit'));
     const regionCounts = new Array(MAX_REGIONS).fill(0);
 
@@ -283,9 +286,6 @@ async function bootstrap() {
   // Last value sent per address, so an idle phone does not re-send identical
   // numbers for ~60 addresses at every tick. Momentary flags bypass this.
   const lastNative = new Map();
-  // Snapshot for the dashboard, published at NATIVE_REPORT_RATE rather than the
-  // tick: it is a readout for a human, not a signal path.
-  const NATIVE_REPORT_RATE = 10; // Hz
   let nativeSnapshot = {};
 
   const nativeGestures = await client.stateManager.create('native-gestures', {
@@ -309,28 +309,6 @@ async function bootstrap() {
     return bank;
   }
 
-  players.onDetach(player => {
-    // the descriptors carry accumulated state; a rejoining phone starts clean
-    const id = player.get('id');
-    banks.delete(id);
-    delete nativeSnapshot[id];
-    for (const key of [...lastNative.keys()]) {
-      if (key.startsWith(`${id}/`)) {
-        lastNative.delete(key);
-      }
-    }
-  });
-
-  // Retuning a constant rebuilds nothing — the C++ objects take it live, which
-  // is the whole reason the params are a single state object.
-  globalState.onUpdate(updates => {
-    if ('nativeParams' in updates) {
-      for (const bank of banks.values()) {
-        bank.setParams(updates.nativeParams);
-      }
-    }
-  });
-
   function runNativeGestures() {
     if (Bank === null) {
       return;
@@ -347,8 +325,6 @@ async function bootstrap() {
       nativeSnapshot[id] = outputs;
 
       for (const { address, values, type, momentary } of flatten(outputs)) {
-        const cacheKey = `${id}/${address}`;
-
         if (momentary) {
           // fires once per event; the zero frames in between say nothing
           if (values[0]) {
@@ -357,6 +333,7 @@ async function bootstrap() {
           continue;
         }
 
+        const cacheKey = `${id}/${address}`;
         const serialized = values.join(',');
         if (lastNative.get(cacheKey) === serialized) {
           continue;
@@ -369,17 +346,35 @@ async function bootstrap() {
     });
   }
 
-  setInterval(() => {
-    nativeGestures.set({ values: nativeSnapshot });
-    nativeSnapshot = {};
-  }, 1000 / NATIVE_REPORT_RATE);
+  players.onDetach(player => {
+    const id = player.get('id');
+    enqueueDevice(device.status(id), i(0));
+    enqueue(meta.connected(), i(players.size));
 
-  const tickInterval = 1000 / puara.bridgeTick;
-  setInterval(() => {
-    computeAggregates();
-    runNativeGestures();
-    flush();
-  }, tickInterval);
+    // the descriptors carry accumulated state; a rejoining phone starts clean
+    banks.delete(id);
+    delete nativeSnapshot[id];
+    for (const key of [...lastNative.keys()]) {
+      if (key.startsWith(`${id}/`)) {
+        lastNative.delete(key);
+      }
+    }
+  });
+
+  globalState.onUpdate(updates => {
+    // Retuning a constant rebuilds nothing — the C++ objects take it live, which
+    // is the whole reason the params are a single state object.
+    if ('nativeParams' in updates) {
+      for (const bank of banks.values()) {
+        bank.setParams(updates.nativeParams);
+      }
+    }
+    // A toggle that changes the shape of every per-device message should say so
+    // in the log the operator is already watching, not only on the dashboard.
+    if ('timestamps' in updates) {
+      console.log(`> timestamps: ${updates.timestamps}`);
+    }
+  });
 
   // ## inbound OSC — a recording tool driving the phones
   //
@@ -416,11 +411,19 @@ async function bootstrap() {
     });
   }
 
-  // bridge health for the dashboard, 1 Hz
   setInterval(() => {
-    bridgeStatus.set({ oscRate: sentCount, lastSend });
-    sentCount = 0;
-  }, 1000);
+    computeAggregates();
+    runNativeGestures();
+    flush();
+  }, 1000 / puara.bridgeTick);
+
+  // a readout for a human, not a signal path — slower than the tick
+  setInterval(() => {
+    nativeGestures.set({ values: nativeSnapshot });
+    nativeSnapshot = {};
+  }, 1000 / NATIVE_REPORT_RATE);
+
+  setInterval(() => bridgeStatus.set(drainStats()), 1000);
 
   enqueue(meta.version(), NAMESPACE_VERSION);
   enqueue(meta.zones(), i(globalState.get('zones').length));
@@ -428,14 +431,6 @@ async function bootstrap() {
 
   console.log(`> puara-bridge online — namespace v${NAMESPACE_VERSION}, tick ${puara.bridgeTick} Hz`);
   console.log(`  timestamps: ${globalState.get('timestamps')}`);
-
-  // A toggle that changes the shape of every per-device message should say so
-  // in the log the operator is already watching, not only on the dashboard.
-  globalState.onUpdate(updates => {
-    if ('timestamps' in updates) {
-      console.log(`> timestamps: ${updates.timestamps}`);
-    }
-  });
 }
 
 // The launcher allows to launch multiple clients in the same terminal window

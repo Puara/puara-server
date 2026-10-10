@@ -30,7 +30,15 @@ double numberAt(const Napi::Object& object, const char* key, double fallback)
   return value.IsNumber() ? value.As<Napi::Number>().DoubleValue() : fallback;
 }
 
-// Reads a [x, y, z] array into out[3], leaving it untouched if absent.
+// Overwrites `target` only when the key holds a number, so a partial params
+// object leaves the rest of the tuning alone.
+template <typename T>
+void readInto(const Napi::Object& object, const char* key, T& target)
+{
+  target = static_cast<T>(numberAt(object, key, static_cast<double>(target)));
+}
+
+// Reads a [x, y, z] array into out[length], leaving it untouched if absent.
 void vectorAt(const Napi::Object& object, const char* key, double* out, int length)
 {
   Napi::Value value = object.Get(key);
@@ -45,27 +53,79 @@ void vectorAt(const Napi::Object& object, const char* key, double* out, int leng
   }
 }
 
+void pairAt(const Napi::Array& array, uint32_t index, double* out)
+{
+  Napi::Value entry = array.Get(index);
+  if(!entry.IsArray())
+    return;
+  Napi::Array pair = entry.As<Napi::Array>();
+  for(uint32_t i = 0; i < 2 && i < pair.Length(); i++)
+  {
+    Napi::Value value = pair.Get(i);
+    if(value.IsNumber())
+      out[i] = value.As<Napi::Number>().DoubleValue();
+  }
+}
+
 double magnitude(const double* v)
 {
   return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
 }
 
-Napi::Array vector3(Napi::Env env, double x, double y, double z)
+// A JS object under construction. Chainable so a descriptor's outputs read as
+// its list of names and values, not as a wall of Napi::…::New.
+class Fields
 {
-  Napi::Array array = Napi::Array::New(env, 3);
-  array.Set(0u, Napi::Number::New(env, x));
-  array.Set(1u, Napi::Number::New(env, y));
-  array.Set(2u, Napi::Number::New(env, z));
-  return array;
-}
+public:
+  explicit Fields(Napi::Env env)
+      : env_(env)
+      , object_(Napi::Object::New(env))
+  {
+  }
 
-Napi::Array vector2(Napi::Env env, double x, double y)
-{
-  Napi::Array array = Napi::Array::New(env, 2);
-  array.Set(0u, Napi::Number::New(env, x));
-  array.Set(1u, Napi::Number::New(env, y));
-  return array;
-}
+  Fields& num(const char* key, double value)
+  {
+    object_.Set(key, Napi::Number::New(env_, value));
+    return *this;
+  }
+
+  Fields& flag(const char* key, bool value)
+  {
+    object_.Set(key, Napi::Boolean::New(env_, value));
+    return *this;
+  }
+
+  Fields& vec(const char* key, double x, double y)
+  {
+    Napi::Array array = Napi::Array::New(env_, 2);
+    array.Set(0u, Napi::Number::New(env_, x));
+    array.Set(1u, Napi::Number::New(env_, y));
+    object_.Set(key, array);
+    return *this;
+  }
+
+  Fields& vec(const char* key, double x, double y, double z)
+  {
+    Napi::Array array = Napi::Array::New(env_, 3);
+    array.Set(0u, Napi::Number::New(env_, x));
+    array.Set(1u, Napi::Number::New(env_, y));
+    array.Set(2u, Napi::Number::New(env_, z));
+    object_.Set(key, array);
+    return *this;
+  }
+
+  Fields& group(const char* key, const Fields& child)
+  {
+    object_.Set(key, child.object_);
+    return *this;
+  }
+
+  Napi::Object object() const { return object_; }
+
+private:
+  Napi::Env env_;
+  Napi::Object object_;
+};
 
 class Bank : public Napi::ObjectWrap<Bank>
 {
@@ -85,7 +145,8 @@ public:
       : Napi::ObjectWrap<Bank>(info)
   {
     // Defaults tuned for a phone reporting m/s^2 and deg/s, rather than the
-    // library's own, which assume an ESP32 instrument's ranges.
+    // library's own, which assume an ESP32 instrument's ranges. Mirrored by
+    // NATIVE_PARAMS in src/shared/native-gestures.js.
     impact_.threshold = 18.0;
     impact_.releaseThreshold = 12.0;
     impact_.minInterval = 120;
@@ -113,42 +174,34 @@ private:
   // way it already retunes the JS ports. Names match the C++ members.
   void applyParams(const Napi::Object& params)
   {
-    impact_.threshold = numberAt(params, "impactThreshold", impact_.threshold);
-    impact_.releaseThreshold
-        = numberAt(params, "impactReleaseThreshold", impact_.releaseThreshold);
-    impact_.minInterval = static_cast<unsigned long>(
-        numberAt(params, "impactMinInterval", static_cast<double>(impact_.minInterval)));
-    envelope_.attack = numberAt(params, "envelopeAttack", envelope_.attack);
-    envelope_.release = numberAt(params, "envelopeRelease", envelope_.release);
-    stillness_.threshold = numberAt(params, "stillnessThreshold", stillness_.threshold);
-    stillness_.settleTime = static_cast<unsigned long>(
-        numberAt(params, "stillnessSettleTime", static_cast<double>(stillness_.settleTime)));
-    segmenter_.onThreshold = numberAt(params, "segmenterOnThreshold", segmenter_.onThreshold);
-    segmenter_.offThreshold = numberAt(params, "segmenterOffThreshold", segmenter_.offThreshold);
-    freefall_.threshold = numberAt(params, "freefallThreshold", freefall_.threshold);
-    rhythm_.smoothing = numberAt(params, "rhythmSmoothing", rhythm_.smoothing);
-    rhythm_.timeout = numberAt(params, "rhythmTimeout", rhythm_.timeout);
-    ribbon_.tapMaxTime = numberAt(params, "ribbonTapMaxTime", ribbon_.tapMaxTime);
-    ribbon_.tapMaxTravel = numberAt(params, "ribbonTapMaxTravel", ribbon_.tapMaxTravel);
+    readInto(params, "impactThreshold", impact_.threshold);
+    readInto(params, "impactReleaseThreshold", impact_.releaseThreshold);
+    readInto(params, "impactMinInterval", impact_.minInterval);
+    readInto(params, "envelopeAttack", envelope_.attack);
+    readInto(params, "envelopeRelease", envelope_.release);
+    readInto(params, "stillnessThreshold", stillness_.threshold);
+    readInto(params, "stillnessSettleTime", stillness_.settleTime);
+    readInto(params, "segmenterOnThreshold", segmenter_.onThreshold);
+    readInto(params, "segmenterOffThreshold", segmenter_.offThreshold);
+    readInto(params, "freefallThreshold", freefall_.threshold);
+    readInto(params, "rhythmSmoothing", rhythm_.smoothing);
+    readInto(params, "rhythmTimeout", rhythm_.timeout);
+    readInto(params, "ribbonTapMaxTime", ribbon_.tapMaxTime);
+    readInto(params, "ribbonTapMaxTravel", ribbon_.tapMaxTravel);
 
+    // One control per 3-axis descriptor: the phone has no reason to tune an axis
+    // on its own, and the dashboard would need three widgets to say so.
     const double deadzone = numberAt(params, "spinDeadzone", spin_.x.deadzone);
-    spin_.x.deadzone = deadzone;
-    spin_.y.deadzone = deadzone;
-    spin_.z.deadzone = deadzone;
+    spin_.x.deadzone = spin_.y.deadzone = spin_.z.deadzone = deadzone;
 
-    // shake/jab keep the names the dashboard already uses for the JS ports
+    // shake/jab/button keep the names the dashboard already uses for the JS ports
     const double shakeThreshold = numberAt(params, "shakeThreshold", shake_.x.threshold);
-    shake_.x.threshold = shakeThreshold;
-    shake_.y.threshold = shakeThreshold;
-    shake_.z.threshold = shakeThreshold;
+    shake_.x.threshold = shake_.y.threshold = shake_.z.threshold = shakeThreshold;
     const double jabThreshold = numberAt(params, "jabThreshold", jab_.x.threshold);
-    jab_.x.threshold = jabThreshold;
-    jab_.y.threshold = jabThreshold;
-    jab_.z.threshold = jabThreshold;
-    button_.countInterval = static_cast<unsigned int>(
-        numberAt(params, "buttonCountInterval", static_cast<double>(button_.countInterval)));
-    button_.holdInterval = static_cast<unsigned int>(
-        numberAt(params, "buttonHoldInterval", static_cast<double>(button_.holdInterval)));
+    jab_.x.threshold = jab_.y.threshold = jab_.z.threshold = jabThreshold;
+
+    readInto(params, "buttonCountInterval", button_.countInterval);
+    readInto(params, "buttonHoldInterval", button_.holdInterval);
   }
 
   Napi::Value SetParams(const Napi::CallbackInfo& info)
@@ -192,12 +245,12 @@ private:
     }
     gravitySeeded_ = true;
 
+    const puara_gestures::Coord3D movement{linear[0], linear[1], linear[2]};
     const double activity = magnitude(linear);
-    const double total = magnitude(accel);
 
     // ## movement, from gravity-free acceleration
-    shake_.update(puara_gestures::Coord3D{linear[0], linear[1], linear[2]});
-    jab_.update(puara_gestures::Coord3D{linear[0], linear[1], linear[2]});
+    shake_.update(movement);
+    jab_.update(movement);
     envelope_.update(activity);
     impact_.update(activity);
     stillness_.update(activity);
@@ -205,7 +258,7 @@ private:
     derivative_.update(activity);
 
     // ## free-fall needs the total, including gravity: weightless is ~0
-    freefall_.update(total);
+    freefall_.update(magnitude(accel));
 
     // ## rotation, straight from the gyroscope
     spin_.update(puara_gestures::Coord3D{gyro[0], gyro[1], gyro[2]});
@@ -223,9 +276,9 @@ private:
       Napi::Array touches = touchesValue.As<Napi::Array>();
       touchCount = static_cast<int>(touches.Length());
       if(touchCount > 0)
-        vectorAtIndex(touches, 0, primary);
+        pairAt(touches, 0, primary);
       if(touchCount > 1)
-        vectorAtIndex(touches, 1, secondary);
+        pairAt(touches, 1, secondary);
     }
 
     const bool touched = touchCount > 0;
@@ -260,125 +313,96 @@ private:
     return describe(env, touchCount);
   }
 
-  static void vectorAtIndex(const Napi::Array& array, uint32_t index, double* out)
-  {
-    Napi::Value entry = array.Get(index);
-    if(!entry.IsArray())
-      return;
-    Napi::Array pair = entry.As<Napi::Array>();
-    for(uint32_t i = 0; i < 2 && i < pair.Length(); i++)
-    {
-      Napi::Value value = pair.Get(i);
-      if(value.IsNumber())
-        out[i] = value.As<Napi::Number>().DoubleValue();
-    }
-  }
-
-  // One flat object per tick. Keys are the OSC leaf names the bridge emits, so
-  // the namespace and this function are read side by side.
+  // One object per tick. Keys are the OSC leaf names the bridge emits, so the
+  // namespace and this function are read side by side.
   Napi::Object describe(Napi::Env env, int touchCount)
   {
-    Napi::Object out = Napi::Object::New(env);
+    const auto shake = shake_.current_value();
+    const auto jab = jab_.current_value();
 
-    auto shake = shake_.current_value();
-    out.Set("shake", vector3(env, shake.x, shake.y, shake.z));
-    auto jab = jab_.current_value();
-    out.Set("jab", vector3(env, jab.x, jab.y, jab.z));
+    Fields out(env);
+    out.vec("shake", shake.x, shake.y, shake.z)
+        .vec("jab", jab.x, jab.y, jab.z)
+        .num("envelope", envelope_.current_value())
+        .group(
+            "impact", Fields(env)
+                          .flag("strike", impact_.strike)
+                          .num("intensity", impact_.intensity)
+                          .num("count", impact_.count))
+        .group(
+            "stillness", Fields(env)
+                             .flag("still", stillness_.still)
+                             .flag("settled", stillness_.settled)
+                             .num("stillTime", stillness_.stillTime))
+        .group(
+            "segmenter", Fields(env)
+                             .flag("active", segmenter_.active)
+                             .flag("onset", segmenter_.onset)
+                             .flag("offset", segmenter_.offset)
+                             .num("duration", segmenter_.duration)
+                             .num("count", segmenter_.count))
+        .group(
+            "freefall", Fields(env)
+                            .flag("freefall", freefall_.freefall)
+                            .flag("onset", freefall_.onset)
+                            .flag("landed", freefall_.landed)
+                            .num("fallTime", freefall_.fallTime))
+        .group(
+            "derivative", Fields(env)
+                              .num("velocity", derivative_.velocity)
+                              .num("acceleration", derivative_.acceleration)
+                              .num("jerk", derivative_.jerk))
+        .group(
+            "spin",
+            Fields(env)
+                .vec("velocity", spin_.x.velocity, spin_.y.velocity, spin_.z.velocity)
+                .vec("angle", spin_.x.angle, spin_.y.angle, spin_.z.angle)
+                .vec(
+                    "revolutions", spin_.x.revolutions, spin_.y.revolutions,
+                    spin_.z.revolutions)
+                .vec(
+                    "turns", static_cast<double>(spin_.x.turns),
+                    static_cast<double>(spin_.y.turns), static_cast<double>(spin_.z.turns)))
+        .group(
+            "orientation", Fields(env)
+                               .num("tilt", tiltRoll_.current_tilt_value())
+                               .num("roll", tiltRoll_.current_roll_value()))
+        .group(
+            "rhythm", Fields(env)
+                          .flag("onset", rhythm_.onset)
+                          .num("onsetCount", rhythm_.onsetCount)
+                          .num("interval", rhythm_.interval)
+                          .num("frequency", rhythm_.frequency)
+                          .num("period", rhythm_.period)
+                          .num("tempo", rhythm_.tempo))
+        .group(
+            "ribbon", Fields(env)
+                          .num("position", ribbon_.position)
+                          .num("velocity", ribbon_.velocity)
+                          .num("direction", ribbon_.direction)
+                          .flag("touched", ribbon_.touched)
+                          .flag("tap", ribbon_.tap))
+        .group(
+            "multitouch", Fields(env)
+                              .num("distance", multitouch_.distance)
+                              .num("scale", multitouch_.scale)
+                              .num("spread", multitouch_.spread)
+                              .num("rotation", multitouch_.rotation)
+                              .num("angle", multitouch_.angle)
+                              .flag("engaged", touchCount > 1))
+        .group(
+            "button", Fields(env)
+                          .num("count", button_.count)
+                          .flag("press", button_.press)
+                          .num("tap", button_.tap)
+                          .num("doubleTap", button_.doubleTap)
+                          .num("tripleTap", button_.tripleTap)
+                          .flag("hold", button_.hold)
+                          .num("pressTime", button_.pressTime))
+        .vec("brush", brushRubX_.brush.value, brushRubY_.brush.value)
+        .vec("rub", brushRubX_.rub.value, brushRubY_.rub.value);
 
-    out.Set("envelope", Napi::Number::New(env, envelope_.current_value()));
-
-    Napi::Object impact = Napi::Object::New(env);
-    impact.Set("strike", Napi::Boolean::New(env, impact_.strike));
-    impact.Set("intensity", Napi::Number::New(env, impact_.intensity));
-    impact.Set("count", Napi::Number::New(env, impact_.count));
-    out.Set("impact", impact);
-
-    Napi::Object stillness = Napi::Object::New(env);
-    stillness.Set("still", Napi::Boolean::New(env, stillness_.still));
-    stillness.Set("settled", Napi::Boolean::New(env, stillness_.settled));
-    stillness.Set("stillTime", Napi::Number::New(env, stillness_.stillTime));
-    out.Set("stillness", stillness);
-
-    Napi::Object segmenter = Napi::Object::New(env);
-    segmenter.Set("active", Napi::Boolean::New(env, segmenter_.active));
-    segmenter.Set("onset", Napi::Boolean::New(env, segmenter_.onset));
-    segmenter.Set("offset", Napi::Boolean::New(env, segmenter_.offset));
-    segmenter.Set("duration", Napi::Number::New(env, segmenter_.duration));
-    segmenter.Set("count", Napi::Number::New(env, segmenter_.count));
-    out.Set("segmenter", segmenter);
-
-    Napi::Object freefall = Napi::Object::New(env);
-    freefall.Set("freefall", Napi::Boolean::New(env, freefall_.freefall));
-    freefall.Set("onset", Napi::Boolean::New(env, freefall_.onset));
-    freefall.Set("landed", Napi::Boolean::New(env, freefall_.landed));
-    freefall.Set("fallTime", Napi::Number::New(env, freefall_.fallTime));
-    out.Set("freefall", freefall);
-
-    Napi::Object derivative = Napi::Object::New(env);
-    derivative.Set("velocity", Napi::Number::New(env, derivative_.velocity));
-    derivative.Set("acceleration", Napi::Number::New(env, derivative_.acceleration));
-    derivative.Set("jerk", Napi::Number::New(env, derivative_.jerk));
-    out.Set("derivative", derivative);
-
-    Napi::Object spin = Napi::Object::New(env);
-    spin.Set("velocity", vector3(env, spin_.x.velocity, spin_.y.velocity, spin_.z.velocity));
-    spin.Set("angle", vector3(env, spin_.x.angle, spin_.y.angle, spin_.z.angle));
-    spin.Set(
-        "revolutions",
-        vector3(env, spin_.x.revolutions, spin_.y.revolutions, spin_.z.revolutions));
-    spin.Set(
-        "turns",
-        vector3(
-            env, static_cast<double>(spin_.x.turns), static_cast<double>(spin_.y.turns),
-            static_cast<double>(spin_.z.turns)));
-    out.Set("spin", spin);
-
-    Napi::Object orientation = Napi::Object::New(env);
-    orientation.Set("tilt", Napi::Number::New(env, tiltRoll_.current_tilt_value()));
-    orientation.Set("roll", Napi::Number::New(env, tiltRoll_.current_roll_value()));
-    out.Set("orientation", orientation);
-
-    Napi::Object rhythm = Napi::Object::New(env);
-    rhythm.Set("onset", Napi::Boolean::New(env, rhythm_.onset));
-    rhythm.Set("onsetCount", Napi::Number::New(env, rhythm_.onsetCount));
-    rhythm.Set("interval", Napi::Number::New(env, rhythm_.interval));
-    rhythm.Set("frequency", Napi::Number::New(env, rhythm_.frequency));
-    rhythm.Set("period", Napi::Number::New(env, rhythm_.period));
-    rhythm.Set("tempo", Napi::Number::New(env, rhythm_.tempo));
-    out.Set("rhythm", rhythm);
-
-    Napi::Object ribbon = Napi::Object::New(env);
-    ribbon.Set("position", Napi::Number::New(env, ribbon_.position));
-    ribbon.Set("velocity", Napi::Number::New(env, ribbon_.velocity));
-    ribbon.Set("direction", Napi::Number::New(env, ribbon_.direction));
-    ribbon.Set("touched", Napi::Boolean::New(env, ribbon_.touched));
-    ribbon.Set("tap", Napi::Boolean::New(env, ribbon_.tap));
-    out.Set("ribbon", ribbon);
-
-    Napi::Object multitouch = Napi::Object::New(env);
-    multitouch.Set("distance", Napi::Number::New(env, multitouch_.distance));
-    multitouch.Set("scale", Napi::Number::New(env, multitouch_.scale));
-    multitouch.Set("spread", Napi::Number::New(env, multitouch_.spread));
-    multitouch.Set("rotation", Napi::Number::New(env, multitouch_.rotation));
-    multitouch.Set("angle", Napi::Number::New(env, multitouch_.angle));
-    multitouch.Set("engaged", Napi::Boolean::New(env, touchCount > 1));
-    out.Set("multitouch", multitouch);
-
-    Napi::Object button = Napi::Object::New(env);
-    button.Set("count", Napi::Number::New(env, button_.count));
-    button.Set("press", Napi::Boolean::New(env, button_.press));
-    button.Set("tap", Napi::Number::New(env, button_.tap));
-    button.Set("doubleTap", Napi::Number::New(env, button_.doubleTap));
-    button.Set("tripleTap", Napi::Number::New(env, button_.tripleTap));
-    button.Set("hold", Napi::Boolean::New(env, button_.hold));
-    button.Set("pressTime", Napi::Number::New(env, button_.pressTime));
-    out.Set("button", button);
-
-    out.Set(
-        "brush", vector2(env, brushRubX_.brush.value, brushRubY_.brush.value));
-    out.Set("rub", vector2(env, brushRubX_.rub.value, brushRubY_.rub.value));
-
-    return out;
+    return out.object();
   }
 
   puara_gestures::Shake3D shake_;

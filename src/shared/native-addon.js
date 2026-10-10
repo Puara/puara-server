@@ -1,9 +1,9 @@
 // Loads the compiled puara-gestures addon. Node-only, so it stays out of
 // src/shared/native-gestures.js, which the browser dashboard imports too.
 //
-// The addon is optional at runtime. A missing or unloadable build must not stop
-// the server: an operator running only the audience system should not need a C++
-// toolchain, and the bridge reports the reason instead of crashing.
+// Optional at runtime: an operator running only the audience system should not
+// need a C++ toolchain, so a missing or unloadable build is reported by the
+// bridge rather than crashing it.
 
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
