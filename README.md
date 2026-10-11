@@ -116,10 +116,15 @@ Two scripts cover a Linux workstation or show machine end to end. No sudo.
 `install.sh` is **safe to rerun**: each step checks its own result and skips.
 Nothing existing is overwritten — neither `certs/*.pem` nor
 `config/env-dev.yaml`. Delete the file yourself to have it regenerated. What it
-does: verifies Node ≥ 18 · `npm install` · fetches mkcert to `~/.local/bin`
-(checksum-pinned) if missing · issues a certificate for the detected LAN IP,
-hostname and localhost · writes `config/env-dev.yaml` pointing at it · builds.
+does: verifies Node ≥ 18 · `npm ci` (the exact versions in `package-lock.json`)
+· fetches mkcert to `~/.local/bin` (checksum-pinned) if missing · issues a
+certificate for the detected LAN IP, hostname and localhost · writes
+`config/env-dev.yaml` pointing at it · builds.
 Use `--no-https` for a desktop-only setup (no phone sensors).
+
+Dependency versions are pinned by the committed `package-lock.json`. To move
+them, run `npm install <pkg>@<version>` (or `npm update`), test, and commit the
+lockfile with it.
 
 `start.sh` flags:
 
@@ -134,7 +139,7 @@ Use `--no-https` for a desktop-only setup (no phone sensors).
 Manual equivalent, if you prefer separate terminals:
 
 ```sh
-npm install
+npm ci
 npm run dev        # build + watch, server on http://127.0.0.1:8000
 npm run bridge     # in a second terminal: OSC bridge (after `npm run build`)
 ```

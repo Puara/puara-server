@@ -53,9 +53,12 @@ fi
 ok "node $(node -v)"
 
 # ---------------------------------------------------------- dependencies
-# package-lock.json is gitignored in this repo, so `npm ci` is not an option.
+# `npm ci` installs exactly what package-lock.json pins, so every machine builds
+# the tree that was tested — a fresh upstream release cannot change it under a
+# show. It replaces node_modules on each run; bump versions with `npm install`
+# and commit the lockfile.
 step "Installing npm dependencies"
-npm install --no-fund --no-audit
+npm ci --no-fund --no-audit
 ok "node_modules ready"
 
 # ------------------------------------------------------- LAN IP detection

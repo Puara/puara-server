@@ -8,12 +8,11 @@
 !/config/env-default.yaml
 
 # junk files
-package-lock.json
 .DS_Store
 Thumbs.db
 
 # TLS certificates
 /**/*.pem
 
-# compiled puara-gestures addon (gesture-tester branch)
+# compiled puara-gestures addon
 /native/build
