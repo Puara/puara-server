@@ -147,10 +147,10 @@ else
 fi
 
 # ------------------------------------------------------- native addon
-# gesture-tester branch: the bridge runs the real C++ puara-gestures descriptors
-# through a Node addon compiled against a checkout of that library. Optional —
-# without it the audience system runs exactly as on main, and the bridge says so
-# at startup instead of failing.
+# The bridge runs the real C++ puara-gestures descriptors through a Node addon
+# compiled against a checkout of that library. Optional — without it the
+# audience system runs as usual, and the bridge says so at startup instead of
+# failing.
 step "Building the puara-gestures addon"
 GESTURES_PATH="${PUARA_GESTURES_PATH:-$(cd "${REPO_ROOT}/.." && pwd)/puara-gestures}"
 
@@ -176,13 +176,29 @@ else
     ok "addon built against system node headers"
   else
     warn "addon build failed — see /tmp/puara-addon-build.log"
+    # The addon uses descriptors that are still open puara-gestures PRs, so a
+    # checkout of that repo's main fails on the first one it lacks.
+    if grep -qE "namespace .puara_gestures." /tmp/puara-addon-build.log; then
+      skip "this checkout lacks descriptors the addon uses (open puara-gestures PRs)"
+      skip "assemble them, then rerun: ./scripts/combine-gestures-prs.sh --all --exclude 135 --build"
+    fi
     skip "the server still runs, without the C++ descriptors"
   fi
 fi
 
 # ---------------------------------------------------------------- build
 step "Building"
-npm run build
+if ! npm run build 2>&1 | tee /tmp/puara-build.log; then
+  warn "build failed — see /tmp/puara-build.log"
+  # @swc/core >= 1.16 unpacks its native binary into ~/.cache on first load and
+  # refuses if a directory above it is group- or world-writable.
+  if grep -q "ERR_SWC_NATIVE_CACHE" /tmp/puara-build.log; then
+    skip "swc will not unpack into ~/.cache: a parent directory is writable by another user"
+    skip "check: stat -c '%a %U %n' / /home ~ ~/.cache   (fix: chmod go-w on the writable one)"
+    skip "or point swc at a fresh dir outside it: SWC_NATIVE_BINDING_CACHE=/tmp/swc-\$USER npm run build"
+  fi
+  exit 1
+fi
 ok "build complete"
 
 # ------------------------------------------------------------- summary
