@@ -300,8 +300,11 @@ have no touch control.
   shorter than one tick still reaches OSC; at a low `sensorRate` it would
   otherwise be lost. Sticks ride the tick like `touch`.
 - Triggers are digital: `l2`/`r2` are `0`/`1`, not an axis.
-- A finger can slide across buttons without lifting. Between two face buttons
-  both are pressed; between two d-pad arms both directions are (the diagonal).
+- A finger can slide across buttons without lifting. Face buttons are read by
+  direction from the centre of their diamond, like the d-pad, so a touch
+  anywhere in the diamond presses the button on that side. On the diagonal
+  between two face buttons both are pressed; between two d-pad arms both
+  directions are (the diagonal).
 - Sticks have a radial dead zone of 0.12, rescaled so the rim still reads 1, and
   three decimals of resolution. A stick is held by the finger that grabbed it
   until that finger lifts, wherever it travels.

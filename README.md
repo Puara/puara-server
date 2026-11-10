@@ -282,6 +282,10 @@ the one drawn under the finger.
 - **gamepad style** — `playstation` (✕ ○ □ △, L1/R1) or `xbox` (A B X Y, LB/RB).
   Look only: OSC names are positional (`south` is ✕ *and* A), so a patch
   survives the switch.
+- The d-pad and face buttons are drawn as large as the screen allows, and both
+  are read by direction from their centre: the whole diamond of face buttons is
+  the target, so a thumb landing between two buttons presses the nearer one
+  instead of nothing, and they can be played without looking.
 - Fingers slide from button to button without lifting; a thumb between two face
   buttons presses both, and between two d-pad arms gives the diagonal. A stick
   is grabbed from a little outside its base and held until the finger lifts.

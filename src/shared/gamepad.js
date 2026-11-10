@@ -69,37 +69,43 @@ export function pressedButtons(mask) {
 // Pinning only ever moves controls apart, never together.
 //
 // `face` is the four-button diamond, `spacing` from its centre to each button.
+//
+// The d-pad and the face buttons are as large as the canvas allows: they are
+// played without looking, by thumbs that cannot feel an edge on glass. Each
+// canvas's aspect is close to the phone surface it serves (a landscape phone
+// minus the tab bar is ~2.5:1, an upright one ~0.6:1), so the canvas is scaled
+// by the phone's short side and little of the screen goes unused.
 const LANDSCAPE = {
-  width: 200,
+  width: 240,
   height: 100,
   controls: [
-    { kind: 'shoulder', name: 'l2', x: 18, y: 9, w: 28, h: 10, pin: ['start', 'start'] },
-    { kind: 'shoulder', name: 'l1', x: 18, y: 22, w: 28, h: 10, pin: ['start', 'start'] },
-    { kind: 'shoulder', name: 'r2', x: 182, y: 9, w: 28, h: 10, pin: ['end', 'start'] },
-    { kind: 'shoulder', name: 'r1', x: 182, y: 22, w: 28, h: 10, pin: ['end', 'start'] },
-    { kind: 'dpad', x: 28, y: 52, r: 20, pin: ['start', 'center'] },
-    { kind: 'face', x: 172, y: 52, spacing: 13, r: 8, pin: ['end', 'center'] },
-    { kind: 'pill', name: 'select', x: 88, y: 52, w: 17, h: 7, pin: ['center', 'center'] },
-    { kind: 'pill', name: 'start', x: 112, y: 52, w: 17, h: 7, pin: ['center', 'center'] },
-    { kind: 'stick', name: 'left', x: 66, y: 80, r: 15, pin: ['start', 'end'] },
-    { kind: 'stick', name: 'right', x: 134, y: 80, r: 15, pin: ['end', 'end'] },
+    { kind: 'shoulder', name: 'l2', x: 20, y: 7, w: 32, h: 10, pin: ['start', 'start'] },
+    { kind: 'shoulder', name: 'l1', x: 20, y: 19, w: 32, h: 10, pin: ['start', 'start'] },
+    { kind: 'shoulder', name: 'r2', x: 220, y: 7, w: 32, h: 10, pin: ['end', 'start'] },
+    { kind: 'shoulder', name: 'r1', x: 220, y: 19, w: 32, h: 10, pin: ['end', 'start'] },
+    { kind: 'dpad', x: 38, y: 64, r: 30, pin: ['start', 'center'] },
+    { kind: 'face', x: 202, y: 64, spacing: 19, r: 12.5, pin: ['end', 'center'] },
+    { kind: 'pill', name: 'select', x: 106, y: 40, w: 18, h: 8, pin: ['center', 'center'] },
+    { kind: 'pill', name: 'start', x: 134, y: 40, w: 18, h: 8, pin: ['center', 'center'] },
+    { kind: 'stick', name: 'left', x: 98, y: 80, r: 15, pin: ['start', 'end'] },
+    { kind: 'stick', name: 'right', x: 142, y: 80, r: 15, pin: ['end', 'end'] },
   ],
 };
 
 const PORTRAIT = {
   width: 100,
-  height: 180,
+  height: 150,
   controls: [
-    { kind: 'shoulder', name: 'l2', x: 16, y: 8, w: 26, h: 9, pin: ['start', 'start'] },
-    { kind: 'shoulder', name: 'l1', x: 16, y: 20, w: 26, h: 9, pin: ['start', 'start'] },
-    { kind: 'shoulder', name: 'r2', x: 84, y: 8, w: 26, h: 9, pin: ['end', 'start'] },
-    { kind: 'shoulder', name: 'r1', x: 84, y: 20, w: 26, h: 9, pin: ['end', 'start'] },
-    { kind: 'dpad', x: 27, y: 64, r: 19, pin: ['start', 'center'] },
-    { kind: 'face', x: 73, y: 64, spacing: 12.5, r: 7.5, pin: ['end', 'center'] },
-    { kind: 'pill', name: 'select', x: 38, y: 96, w: 17, h: 7, pin: ['center', 'center'] },
-    { kind: 'pill', name: 'start', x: 62, y: 96, w: 17, h: 7, pin: ['center', 'center'] },
-    { kind: 'stick', name: 'left', x: 27, y: 148, r: 17, pin: ['start', 'end'] },
-    { kind: 'stick', name: 'right', x: 73, y: 148, r: 17, pin: ['end', 'end'] },
+    { kind: 'shoulder', name: 'l2', x: 16, y: 7, w: 28, h: 10, pin: ['start', 'start'] },
+    { kind: 'shoulder', name: 'l1', x: 16, y: 19, w: 28, h: 10, pin: ['start', 'start'] },
+    { kind: 'shoulder', name: 'r2', x: 84, y: 7, w: 28, h: 10, pin: ['end', 'start'] },
+    { kind: 'shoulder', name: 'r1', x: 84, y: 19, w: 28, h: 10, pin: ['end', 'start'] },
+    { kind: 'dpad', x: 24.5, y: 56, r: 20, pin: ['start', 'center'] },
+    { kind: 'face', x: 75.5, y: 56, spacing: 13.5, r: 9, pin: ['end', 'center'] },
+    { kind: 'pill', name: 'select', x: 38, y: 88, w: 17, h: 7, pin: ['center', 'center'] },
+    { kind: 'pill', name: 'start', x: 62, y: 88, w: 17, h: 7, pin: ['center', 'center'] },
+    { kind: 'stick', name: 'left', x: 27, y: 126, r: 17, pin: ['start', 'end'] },
+    { kind: 'stick', name: 'right', x: 73, y: 126, r: 17, pin: ['end', 'end'] },
   ],
 };
 
@@ -115,13 +121,12 @@ function place(value, pin, size, canvasSize, scale) {
 }
 
 // Element size in px → controls in px, origin at the element's top-left.
-// Whichever canvas fills the element better wins, so a phone gets the portrait
-// layout held upright and the landscape one turned sideways, and the short,
-// wide pad on the Data tab gets the landscape one.
+// The element's own shape picks the canvas: a phone gets the portrait layout
+// held upright and the landscape one turned sideways, and the short, wide pad
+// on the Data tab gets the landscape one.
 export function gamepadLayout(width, height) {
-  const fit = canvas => Math.min(width / canvas.width, height / canvas.height);
-  const canvas = fit(LANDSCAPE) >= fit(PORTRAIT) ? LANDSCAPE : PORTRAIT;
-  const scale = fit(canvas);
+  const canvas = width >= height ? LANDSCAPE : PORTRAIT;
+  const scale = Math.min(width / canvas.width, height / canvas.height);
   const controls = [];
 
   for (const spec of canvas.controls) {
@@ -132,8 +137,22 @@ export function gamepadLayout(width, height) {
       case 'face': {
         const s = spec.spacing * scale;
         const r = spec.r * scale;
+        // `cx`/`cy`/`spacing` describe the whole diamond: the hit test reads a
+        // touch by its direction from the diamond's centre, as the d-pad does
         for (const [name, dx, dy] of [['north', 0, -s], ['east', s, 0], ['south', 0, s], ['west', -s, 0]]) {
-          controls.push({ kind: 'button', shape: 'face', name, bit: GAMEPAD_BIT[name], x: x + dx, y: y + dy, w: 2 * r, h: 2 * r });
+          controls.push({
+            kind: 'button',
+            shape: 'face',
+            name,
+            bit: GAMEPAD_BIT[name],
+            x: x + dx,
+            y: y + dy,
+            w: 2 * r,
+            h: 2 * r,
+            cx: x,
+            cy: y,
+            spacing: s,
+          });
         }
         break;
       }
@@ -166,9 +185,18 @@ export function gamepadLayout(width, height) {
 
 // ## hit testing
 // Targets are a little larger than what is drawn: a thumb lands off-centre, and
-// on glass there is no edge to feel for. Adjacent face buttons overlap by a
-// sliver, so a thumb between ✕ and □ presses both, as on a real pad.
-const FACE_SLOP = 1.2;
+// on glass there is no edge to feel for.
+//
+// The face buttons are read like the d-pad, by direction from the diamond's
+// centre, not as four separate circles: the whole diamond is the target and its
+// quarter under the thumb is the button, so a thumb that lands between buttons
+// still presses the nearest instead of nothing — the miss that makes them
+// unplayable without looking. Each claims ±50° around its axis, so a thumb on
+// the diagonal between ✕ and □ presses both, as on a real pad.
+const FACE_SLOP = 1.15;
+const FACE_HALF_ANGLE = (50 * Math.PI) / 180;
+// as on the d-pad, a thumb on the diamond's centre is pressing nothing
+const FACE_DEAD = 0.3;
 const RECT_SLOP = 1.15;
 const DPAD_SLOP = 1.2;
 // a finger resting on the d-pad's centre is not pushing any direction
@@ -182,13 +210,28 @@ const STICK_CAPTURE = 1.5;
 // radial dead zone, rescaled so the output still reaches 1 at the rim
 const STICK_DEAD = 0.12;
 
-function hitButton(control, x, y) {
-  const dx = Math.abs(x - control.x);
-  const dy = Math.abs(y - control.y);
-  if (control.shape === 'face') {
-    return Math.hypot(dx, dy) <= (control.w / 2) * FACE_SLOP;
+// angle between two directions, 0..π
+function angleBetween(a, b) {
+  const delta = Math.abs(a - b) % (2 * Math.PI);
+  return delta > Math.PI ? 2 * Math.PI - delta : delta;
+}
+
+function hitFace(control, x, y) {
+  const distance = Math.hypot(x - control.cx, y - control.cy);
+  if (distance > (control.spacing + control.w / 2) * FACE_SLOP || distance < control.spacing * FACE_DEAD) {
+    return false;
   }
-  return dx <= (control.w / 2) * RECT_SLOP && dy <= (control.h / 2) * RECT_SLOP;
+  // screen coordinates: +y is down
+  const axis = Math.atan2(control.y - control.cy, control.x - control.cx);
+  return angleBetween(Math.atan2(y - control.cy, x - control.cx), axis) < FACE_HALF_ANGLE;
+}
+
+function hitButton(control, x, y) {
+  if (control.shape === 'face') {
+    return hitFace(control, x, y);
+  }
+  return Math.abs(x - control.x) <= (control.w / 2) * RECT_SLOP
+    && Math.abs(y - control.y) <= (control.h / 2) * RECT_SLOP;
 }
 
 function dpadMask(control, x, y) {
@@ -201,11 +244,7 @@ function dpadMask(control, x, y) {
   const angle = Math.atan2(dy, dx); // screen coordinates: +y is down
   let mask = 0;
   for (const [name, axis] of [['dpad/right', 0], ['dpad/down', Math.PI / 2], ['dpad/left', Math.PI], ['dpad/up', -Math.PI / 2]]) {
-    let delta = Math.abs(angle - axis);
-    if (delta > Math.PI) {
-      delta = 2 * Math.PI - delta;
-    }
-    if (delta < DPAD_HALF_ANGLE) {
+    if (angleBetween(angle, axis) < DPAD_HALF_ANGLE) {
       mask |= 1 << GAMEPAD_BIT[name];
     }
   }
