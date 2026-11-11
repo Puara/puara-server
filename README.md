@@ -306,8 +306,9 @@ What the phone draws is chosen live in the dashboard's *Touch surface* panel
   regions is one JavaScript file in [`surfaces/`](surfaces/); drop a new one
   in `surfaces/local/` (ignored by git) and it appears in the dropdown as soon
   as it is saved — no restart, no build. Each file declares its own dashboard
-  controls and its own OSC outputs. The guide:
-  **[surfaces/README.md](surfaces/README.md)**.
+  controls and its own OSC outputs. Step-by-step tutorial:
+  **[docs/CUSTOM-SURFACES.md](docs/CUSTOM-SURFACES.md)**; reference:
+  [surfaces/README.md](surfaces/README.md).
 
 What every surface shares:
 
@@ -324,8 +325,8 @@ What every surface shares:
   addresses under its controls.
 - A phone that drops out mid-press, changes tab or switches surface sends the
   releases, so nothing downstream is left held.
-- The Data tab's pad draws the same surface, and its `surface` row shows what
-  the surface is sending.
+- The Data tab's pad draws the same surface, and a row named after the surface
+  shows what it is sending.
 
 The gamepad in detail ([`surfaces/gamepad.js`](surfaces/gamepad.js)):
 
@@ -398,7 +399,8 @@ native/                       # optional: the puara-gestures C++ addon
 ├── gestures-path.cjs         # where that checkout is
 └── src/puara_addon.cpp       # one descriptor bank per phone
 docs/
-├── NAMESPACE.md              # the OSC contract (versioned, currently 0.5.0)
+├── NAMESPACE.md              # the OSC contract (versioned, currently 0.6.0)
+├── CUSTOM-SURFACES.md        # tutorial: making your own touch surface
 ├── GESTURE-TESTER.md         # running the C++ library live (the addon)
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots

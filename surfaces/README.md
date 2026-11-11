@@ -27,6 +27,10 @@ all, and switching applies live to every phone.
 The touch streams (`touch`, `tap`, brush/rub, `button`, `region`) keep flowing
 whatever is drawn. A surface adds its own outputs on top.
 
+New to this? [`docs/CUSTOM-SURFACES.md`](../docs/CUSTOM-SURFACES.md) builds one
+step by step, from a single button to a pad grid with dashboard settings. This
+page is the reference.
+
 ## The file
 
 A surface is an ES module whose default export is an object:

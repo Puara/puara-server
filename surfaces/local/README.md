@@ -6,5 +6,6 @@ Put your surface files here (`my-surface.js`). They appear in the dashboard's
 Everything in this folder except this README is ignored by git, so your work
 stays on this machine until you choose to contribute it.
 
-Start by copying [`../xy-pad.js`](../xy-pad.js); the guide is
+Start with the tutorial, [`docs/CUSTOM-SURFACES.md`](../../docs/CUSTOM-SURFACES.md),
+or by copying [`../xy-pad.js`](../xy-pad.js); the reference is
 [`../README.md`](../README.md).
