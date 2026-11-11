@@ -3,8 +3,8 @@ import path from 'node:path';
 
 import YAML from 'yaml';
 
-import { DEFAULT_REGIONS, SURFACES, normalizeRegions } from './touch-layout.js';
-import { GAMEPAD_STYLES } from './gamepad.js';
+import { DEFAULT_REGIONS, SPLITS, normalizeRegions } from './touch-layout.js';
+import { REGIONS_SURFACE } from './surfaces.js';
 import { NATIVE_PARAM_DEFAULTS } from './native-gestures.js';
 import { TIMESTAMP_LEVELS } from './namespace.js';
 
@@ -29,7 +29,8 @@ const DEFAULTS = {
     rub: true,
     button: true,
     region: true,
-    gamepad: true,
+    // the plugin surface's outputs (surfaces/*.js)
+    surface: true,
   },
   // '' → the server fills in its own LAN origin at startup
   publicAddress: '',
@@ -42,10 +43,11 @@ const DEFAULTS = {
     regions: DEFAULT_REGIONS,
     // on-screen confirmation that a touch was registered and sent
     feedback: true,
-    // 'regions' | 'gamepad' — what the surface draws
-    surface: 'regions',
-    // 'playstation' | 'xbox' — the gamepad's look
-    gamepadStyle: 'playstation',
+    // 'regions' or a plugin's name (surfaces/<name>.js) — what the surface
+    // draws. Checked against what is on disk once the server has scanned it.
+    surface: REGIONS_SURFACE,
+    // { <surface>: { <param>: value } } — starting settings per plugin
+    surfaces: {},
   },
   // gesture-tester branch: constants for the C++ descriptors the bridge runs
   nativeGestures: NATIVE_PARAM_DEFAULTS,
@@ -137,26 +139,34 @@ export function loadPuaraConfig(root = process.cwd()) {
   // `streams`, `gestures` and `touch` are merged key by key: a partial block in
   // the YAML (e.g. only `gyro: false`) must not drop the siblings to undefined.
   const touch = { ...DEFAULTS.touch, ...(parsed.touch || {}) };
+  const surfaces = { ...(touch.surfaces || {}) };
+  // before surfaces were plugins: `touch.gamepadStyle` and `streams.gamepad`
+  if (touch.gamepadStyle !== undefined) {
+    surfaces.gamepad = { style: touch.gamepadStyle, ...(surfaces.gamepad || {}) };
+  }
+  const streams = { ...DEFAULTS.streams, ...(parsed.streams || {}) };
+  if (parsed.streams && parsed.streams.surface === undefined && parsed.streams.gamepad !== undefined) {
+    streams.surface = parsed.streams.gamepad;
+  }
+  delete streams.gamepad;
 
   return {
     ...DEFAULTS,
     ...parsed,
     timestamps: normalizeTimestamps(parsed.timestamps),
     oscInput: normalizeOscInput(parsed.oscInput),
-    streams: { ...DEFAULTS.streams, ...(parsed.streams || {}) },
+    streams,
     gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
     nativeGestures: { ...DEFAULTS.nativeGestures, ...(parsed.nativeGestures || {}) },
     // hand-written YAML is the one place a malformed colour can enter
     touch: {
-      ...touch,
+      split: oneOf(touch.split, SPLITS, DEFAULTS.touch.split, 'touch.split'),
+      text: touch.text,
+      feedback: touch.feedback,
       regions: normalizeRegions(touch.regions),
-      surface: oneOf(touch.surface, SURFACES, DEFAULTS.touch.surface, 'touch.surface'),
-      gamepadStyle: oneOf(
-        touch.gamepadStyle,
-        GAMEPAD_STYLES,
-        DEFAULTS.touch.gamepadStyle,
-        'touch.gamepadStyle',
-      ),
+      // validated by the server against the catalog (src/server.js)
+      surface: typeof touch.surface === 'string' ? touch.surface : REGIONS_SURFACE,
+      surfaces,
     },
   };
 }

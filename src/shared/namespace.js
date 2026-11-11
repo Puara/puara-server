@@ -1,6 +1,12 @@
 // Single source of truth for the OSC namespace — the contract lives in
 // docs/NAMESPACE.md and must match this file exactly.
 
+// 0.6.0 — touch surfaces are plugins (surfaces/*.js). Each one's outputs go out
+// as `<id>/<surface>/<output>` per device and `global/<surface>/<output>` (mean
+// of a value) or `global/<surface>/<output>/count` (phones pressing a button)
+// for the audience, under `streams.surface` (was `streams.gamepad`). The
+// gamepad is now one such plugin and its addresses are unchanged; the new
+// shipped `xy-pad` and any local surface add their own.
 // 0.5.0 — virtual gamepad: per-device `gamepad/<button>` and
 // `gamepad/stick/<side>`, and the audience-scale `global/gamepad/...` counts and
 // mean sticks, emitted while the touch surface is drawn as a gamepad. Additive;
@@ -18,7 +24,7 @@
 // 0.2.0 — `shake` changed from an event float to a continuous 3-axis energy
 // signal (puara-gestures semantics) and `jab` took over the old behaviour;
 // jab/brush/rub/button and multi-touch addresses added.
-export const NAMESPACE_VERSION = '0.5.0';
+export const NAMESPACE_VERSION = '0.6.0';
 
 const ROOT = '/puara/audience';
 
@@ -64,10 +70,9 @@ export const device = {
   buttonPress: id => `${ROOT}/${id}/button/press`,
   buttonHold: id => `${ROOT}/${id}/button/hold`,
   buttonPressTime: id => `${ROOT}/${id}/button/presstime`,
-  // virtual gamepad — `name` from GAMEPAD_BUTTONS (src/shared/gamepad.js), e.g.
-  // 'south' or 'dpad/up'; `side` is 'left' | 'right'
-  gamepadButton: (id, name) => `${ROOT}/${id}/gamepad/${name}`,
-  gamepadStick: (id, side) => `${ROOT}/${id}/gamepad/stick/${side}`,
+  // a plugin surface's output, e.g. ('7', 'gamepad', 'dpad/up') or
+  // ('7', 'xy-pad', 'position') — names from the surface's `outputs`
+  surfaceOutput: (id, surface, name) => `${ROOT}/${id}/${surface}/${name}`,
 };
 
 export const zone = {
@@ -84,8 +89,8 @@ export const global = {
   // answer the sub-areas exist for, emitted for every region of the current
   // split so a piece can read them as a fixed-size set
   regionCount: n => `${ROOT}/global/region/${n}/count`,
-  // how many phones hold each gamepad button, and the mean of every phone's
-  // stick (a phone not touching it counts as centred)
-  gamepadCount: name => `${ROOT}/global/gamepad/${name}/count`,
-  gamepadStick: side => `${ROOT}/global/gamepad/stick/${side}`,
+  // a plugin surface across the audience: how many phones hold a `button`
+  // output, and the mean of a `value` output (a phone at rest counts as 0)
+  surfaceCount: (surface, name) => `${ROOT}/global/${surface}/${name}/count`,
+  surfaceMean: (surface, name) => `${ROOT}/global/${surface}/${name}`,
 };

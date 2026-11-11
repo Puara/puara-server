@@ -100,7 +100,7 @@ async function main() {
   }
   console.log(`\n[smoke] server at ${origin}, addon ${addon}`);
 
-  for (const path of ['/', '/controller', '/build/player.js']) {
+  for (const path of ['/', '/controller', '/build/player.js', '/surfaces/gamepad.js', '/surfaces/gamepad/gamepad.css']) {
     const { status, body } = await get(origin + path);
     console.log(`[smoke] GET ${path} -> ${status} (${body.length} bytes)`);
     if (status !== 200 || body.length === 0) {

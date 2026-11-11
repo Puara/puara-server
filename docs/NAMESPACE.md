@@ -1,4 +1,4 @@
-# OSC Namespace — `/puara/audience` (v0.5.0)
+# OSC Namespace — `/puara/audience` (v0.6.0)
 
 This document is the **contract** between the puara-bridge and everything
 downstream (ossia score, SpatGRIS, piece logic). The single source of truth in
@@ -16,7 +16,7 @@ Sent once at bridge startup, `connected` also on every join/leave.
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.5.0"` |
+| `/puara/audience/meta/version` | `s` | namespace version, e.g. `"0.6.0"` |
 | `/puara/audience/meta/connected` | `i` | connected player count |
 | `/puara/audience/meta/zones` | `i` | configured zone count |
 
@@ -257,29 +257,55 @@ Always left-to-right, then top-to-bottom.
 - `region` follows the **primary** pointer only, like `touch` and `brush`/`rub`.
   Multi-touch across several regions is visible in `touch/<n>`, not here.
 
-## Virtual gamepad — `touch.surface: gamepad`, gated by `streams.gamepad`
+## Touch surfaces — plugins, gated by `streams.surface`
 
-Added in 0.5.0. The touch surface can be drawn as a game controller instead of
-the regions (dashboard *Touch surface* panel → `surface`). Layout and hit
-testing: [`src/shared/gamepad.js`](../src/shared/gamepad.js).
+Since 0.6.0, what the phone draws besides the built-in regions is a plugin: one
+file in [`surfaces/`](../surfaces/) (shipped) or `surfaces/local/` (the
+operator's own), chosen live in the dashboard's *Touch surface* panel or with
+`touch.surface`. Writing one: [`surfaces/README.md`](../surfaces/README.md).
+The contract in code: [`src/shared/surfaces.js`](../src/shared/surfaces.js).
 
-Nothing above changes in gamepad mode: `touch`, `touch/<n>`, `tap`, `brush`,
+Nothing above changes whatever is drawn: `touch`, `touch/<n>`, `tap`, `brush`,
 `rub`, `button/*` and `region` are computed from the same pointers as with the
 regions drawn — `region` keeps following `split` even though the split is not
-on screen. The addresses below are **added** on top.
-
-Like `region`, these are descriptors of the touch, not raw streams: emitted in
-every `interactionMode`, not gated by `emitRaw`, and `streams.gamepad: false`
-removes them from the phone uplink as well as from OSC.
+on screen. A plugin's outputs are **added** on top, under the surface's name:
 
 | address | types | value |
 |---|---|---|
-| `/puara/audience/<id>/gamepad/<button>` | `i` | `1` on press, `0` on release — one message per change, never repeated while held |
-| `/puara/audience/<id>/gamepad/stick/left` | `ff` | x, y in −1..1, **+y down** (W3C Gamepad API); sent when it changes |
+| `/puara/audience/<id>/<surface>/<output>` | `i` | a `button` output: `1` on press, `0` on release — one message per change, never repeated while held |
+| `/puara/audience/<id>/<surface>/<output>` | `f`… | a `value` output: its `size` floats, sent when they change |
+
+Like `region`, these are descriptors of the touch, not raw streams: emitted in
+every `interactionMode`, not gated by `emitRaw`, and `streams.surface: false`
+removes them from the phone uplink as well as from OSC (`streams.gamepad`
+before 0.6.0, still read).
+
+- **Buttons are sent from the touch handler, not the sensor tick**, so a press
+  shorter than one tick still reaches OSC; at a low `sensorRate` it would
+  otherwise be lost. Values ride the tick like `touch`.
+- **Releases are guaranteed.** A phone that disconnects mid-press gets a `0` on
+  every button it held and its values zeroed by the bridge, after its
+  `/status 0`. Switching surface, a tab change or a panic release on the phone
+  — sent immediately, even while paused.
+- A surface's name and outputs cannot shadow an existing address: `touch`,
+  `tap`, `region`, `shake`, `button` and the other names above are refused.
+
+The audience aggregates for the surface being drawn are in
+[Global aggregates](#global-aggregates--always-emitted-at-bridgetick).
+
+### `gamepad` — the virtual controller
+
+Shipped as [`surfaces/gamepad.js`](../surfaces/gamepad.js). Its addresses are
+the same as when it was built in (0.5.0).
+
+| address | types | value |
+|---|---|---|
+| `/puara/audience/<id>/gamepad/<button>` | `i` | `1` on press, `0` on release |
+| `/puara/audience/<id>/gamepad/stick/left` | `ff` | x, y in −1..1, **+y down** (W3C Gamepad API) |
 | `/puara/audience/<id>/gamepad/stick/right` | `ff` | same |
 
 `<button>` is positional, never the printed glyph, so a patch survives switching
-`gamepadStyle`:
+the `style` param:
 
 | `<button>` | PlayStation | Xbox | W3C index |
 |---|---|---|---|
@@ -292,13 +318,9 @@ removes them from the phone uplink as well as from OSC.
 | `select` / `start` | Select / Start | View / Menu | 8 / 9 |
 | `dpad/up` `dpad/down` `dpad/left` `dpad/right` | d-pad | d-pad | 12–15 |
 
-The W3C index is the bit in the `gamepadButtons` mask the phone sends, matching
-`navigator.getGamepads()[n].buttons[index]`. Stick clicks (10/11) and home (16)
-have no touch control.
+The W3C index is what the name means in `navigator.getGamepads()[n].buttons`.
+Stick clicks (10/11) and home (16) have no touch control.
 
-- **Buttons are sent from the touch handler, not the sensor tick**, so a press
-  shorter than one tick still reaches OSC; at a low `sensorRate` it would
-  otherwise be lost. Sticks ride the tick like `touch`.
 - Triggers are digital: `l2`/`r2` are `0`/`1`, not an axis.
 - A finger can slide across buttons without lifting. Face buttons are read by
   direction from the centre of their diamond, like the d-pad, so a touch
@@ -308,10 +330,16 @@ have no touch control.
 - Sticks have a radial dead zone of 0.12, rescaled so the rim still reads 1, and
   three decimals of resolution. A stick is held by the finger that grabbed it
   until that finger lifts, wherever it travels.
-- **Releases are guaranteed.** A phone that disconnects mid-press gets a `0` on
-  every button it held and its sticks zeroed by the bridge, after its
-  `/status 0`. Switching the surface back to `regions`, a tab change or a panic
-  release on the phone — sent immediately, even while paused.
+
+### `xy-pad` — one pad
+
+Shipped as [`surfaces/xy-pad.js`](../surfaces/xy-pad.js), the smallest complete
+example.
+
+| address | types | value |
+|---|---|---|
+| `/puara/audience/<id>/xy-pad/position` | `ff` | x, y in 0..1, **+y down**; back to `0.5 0.5` on release unless the `hold` param is on |
+| `/puara/audience/<id>/xy-pad/press` | `i` | `1` while a finger is on the pad |
 
 ## Zone aggregates — always emitted, at `bridgeTick`
 
@@ -333,9 +361,8 @@ Only zones with at least one connected player are emitted.
 | `/puara/audience/global/taps` | `f` | taps/second across all players, 2 s window |
 | `/puara/audience/global/touchcount` | `i` | players currently touching the screen |
 | `/puara/audience/global/region/<n>/count` | `i` | players currently touching region `<n>`, `<n>` = 0–3 **always** (regions the current split does not use report `0`), gated by `streams.region` |
-| `/puara/audience/global/gamepad/<button>/count` | `i` | players currently holding `<button>`, every button at every tick — **only while the surface is `gamepad`** and `streams.gamepad` is on, plus one final round of `0`s when either stops |
-| `/puara/audience/global/gamepad/stick/left` | `ff` | mean left stick across **all** connected players (a phone not touching it counts as centred) — same gating as above |
-| `/puara/audience/global/gamepad/stick/right` | `ff` | same, right stick |
+| `/puara/audience/global/<surface>/<output>/count` | `i` | for each `button` output of the plugin surface being drawn: phones currently holding it, every output at every tick — **only while a plugin surface is drawn** and `streams.surface` is on, plus one final round of `0`s when either stops or the surface changes. E.g. `/puara/audience/global/gamepad/south/count` |
+| `/puara/audience/global/<surface>/<output>` | `f`… | for each `value` output: the mean over the phones drawing that surface (a phone at rest counts with its rest value — centred sticks, a centred xy-pad). Same gating. E.g. `/puara/audience/global/gamepad/stick/left`. Before 0.6.0 the gamepad's mean was over every connected phone, including ones that had not loaded the gamepad yet |
 
 ## Axis conventions & caveats
 

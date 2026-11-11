@@ -16,3 +16,8 @@ Thumbs.db
 
 # compiled puara-gestures addon
 /native/build
+
+# your own touch surfaces (surfaces/README.md): kept out of git until one is
+# contributed back as a shipped surface in surfaces/
+/surfaces/local/*
+!/surfaces/local/README.md

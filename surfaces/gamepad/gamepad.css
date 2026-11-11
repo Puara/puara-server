@@ -1,0 +1,139 @@
+/*
+ * gamepad surface — the look. Positions and sizes are inline px from
+ * gamepadLayout() in geometry.js; this is only how things are drawn.
+ *
+ * Loaded by the phones and the dashboard preview through the surface's
+ * `stylesheet` (see surfaces/README.md). Plain CSS, no nesting, so it works on
+ * the older phones an audience brings.
+ *
+ * Same discipline as the regions: outlines and faint fills on black, and the
+ * pressed state takes light away instead of adding it — a few hundred of these
+ * screens are a light source inside the dome.
+ */
+
+.gamepad {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-touch-callout: none;
+  --pad-line: rgba(255, 255, 255, 0.3);
+  --pad-fill: rgba(255, 255, 255, 0.06);
+  --pad-ink: rgba(255, 255, 255, 0.78);
+}
+.gamepad > div {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: var(--pad-ink);
+  transition: transform 60ms ease-out, opacity 60ms linear;
+}
+.gamepad span {
+  font-weight: bold;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.gamepad .pad-face {
+  border-radius: 50%;
+  border: 2px solid var(--pad-line);
+  background-color: var(--pad-fill);
+}
+.gamepad .pad-face svg {
+  width: 64%;
+  height: 64%;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 0.17;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.gamepad .pad-shoulder {
+  border: 2px solid var(--pad-line);
+  background-color: var(--pad-fill);
+  border-radius: 8px 8px 14px 14px;
+}
+.gamepad .pad-pill {
+  border: 2px solid var(--pad-line);
+  background-color: var(--pad-fill);
+  border-radius: 999px;
+}
+.gamepad .pad-pill span {
+  font-weight: normal;
+}
+.gamepad .pad-dpad svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.gamepad .pad-dpad svg .pad-dpad-hub,
+.gamepad .pad-dpad svg .pad-dpad-arm {
+  fill: var(--pad-fill);
+}
+.gamepad .pad-dpad svg .pad-dpad-arrow {
+  fill: var(--pad-ink);
+  fill-opacity: 0.85;
+}
+.gamepad .pad-dpad svg .pad-dpad-outline {
+  fill: none;
+  stroke: var(--pad-line);
+  stroke-width: 0.03;
+  stroke-linejoin: round;
+}
+.gamepad .pad-dpad svg g path {
+  transition: fill-opacity 60ms linear;
+}
+.gamepad .pad-dpad svg g.pressed .pad-dpad-arm {
+  fill-opacity: 0;
+}
+.gamepad .pad-dpad svg g.pressed .pad-dpad-arrow {
+  fill-opacity: 0.12;
+}
+.gamepad .pad-stick {
+  border-radius: 50%;
+  border: 2px solid var(--pad-line);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+.gamepad .pad-knob {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.1);
+  will-change: transform;
+}
+.gamepad > div.pressed {
+  transform: scale(0.9);
+  opacity: 0.4;
+}
+.gamepad.gamepad-playstation .pad-south {
+  color: #7ea6f2;
+}
+.gamepad.gamepad-playstation .pad-east {
+  color: #ee7d7d;
+}
+.gamepad.gamepad-playstation .pad-west {
+  color: #e79acd;
+}
+.gamepad.gamepad-playstation .pad-north {
+  color: #62d3ad;
+}
+.gamepad.gamepad-xbox .pad-south {
+  color: #74c063;
+}
+.gamepad.gamepad-xbox .pad-east {
+  color: #e3635a;
+}
+.gamepad.gamepad-xbox .pad-west {
+  color: #5a9ee6;
+}
+.gamepad.gamepad-xbox .pad-north {
+  color: #e8bf4f;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gamepad > div,
+  .gamepad .pad-dpad svg g path {
+    transition: none;
+  }
+}

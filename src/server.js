@@ -1,5 +1,6 @@
 import { networkInterfaces } from 'node:os';
 
+import express from 'express';
 import '@soundworks/helpers/polyfills.js';
 import '@soundworks/helpers/catch-unhandled-errors.js';
 import { Server } from '@soundworks/core/server.js';
@@ -14,6 +15,8 @@ import {
   nativeGesturesDescription,
 } from './shared/schemas.js';
 import { loadPuaraConfig } from './shared/load-puara-config.js';
+import { SURFACES_DIR, loadSurfaces, watchSurfaces } from './shared/load-surfaces.js';
+import { REGIONS_SURFACE, normalizeParams } from './shared/surfaces.js';
 
 const config = loadConfig(process.env.ENV, import.meta.url);
 const puara = loadPuaraConfig();
@@ -27,6 +30,10 @@ console.log(`
 
 const server = new Server(config);
 configureHttpRouter(server);
+// Surface plugins are fetched by the phones and the dashboard as plain ES
+// modules (src/shared/surface-host.js). Revalidated on every load rather than
+// cached, so an edited file reaches a phone on its next reload.
+server.router.use('/surfaces', express.static(SURFACES_DIR, { maxAge: 0 }));
 
 server.pluginManager.register('platform-init', ServerPluginPlatformInit);
 server.pluginManager.register('checkin', ServerPluginCheckin, {
@@ -62,6 +69,41 @@ function detectLanAddress() {
 const publicAddress = puara.publicAddress
   || `${protocol}://${serverAddress || detectLanAddress()}:${port}`;
 
+// ## touch surfaces — the plugins on disk, and each one's settings
+function warnParam(id, source) {
+  return (key, value) => console.warn(
+    `[puara] ${source} ${id}.${key}: ${JSON.stringify(value)} does not fit — using the default`,
+  );
+}
+
+// `stored` is { [surfaceId]: { [param]: value } }: the YAML at boot, the live
+// values on a rescan. Every surface in the catalog gets a full, valid set.
+function paramsFor(catalog, stored, source) {
+  return Object.fromEntries(catalog.map(entry => [
+    entry.id,
+    normalizeParams(entry, stored[entry.id], warnParam(entry.id, source)),
+  ]));
+}
+
+function surfaceOrRegions(id, catalog) {
+  if (id === REGIONS_SURFACE || catalog.some(entry => entry.id === id)) {
+    return id;
+  }
+  console.warn(`[puara] touch surface "${id}" not found in surfaces/ — drawing the regions`);
+  return REGIONS_SURFACE;
+}
+
+function reportSurfaces(catalog, problems) {
+  for (const problem of problems) {
+    console.warn(`[puara] surfaces: ${problem}`);
+  }
+  const names = catalog.map(entry => (entry.source === 'local' ? `${entry.id} (local)` : entry.id));
+  console.log(`Touch surfaces: ${[`${REGIONS_SURFACE} (built in)`, ...names].join(', ')}`);
+}
+
+const surfaces = await loadSurfaces();
+reportSurfaces(surfaces.catalog, surfaces.problems);
+
 const global = await server.stateManager.create('global', {
   sensorRate: puara.sensorRate,
   interactionMode: puara.interactionMode,
@@ -77,15 +119,16 @@ const global = await server.stateManager.create('global', {
   streamRub: puara.streams.rub,
   streamButton: puara.streams.button,
   streamRegion: puara.streams.region,
-  streamGamepad: puara.streams.gamepad,
+  streamSurface: puara.streams.surface,
   publicAddress,
   maxTouches: puara.maxTouches,
   touchSplit: puara.touch.split,
   touchText: puara.touch.text,
   touchRegions: puara.touch.regions,
   touchFeedback: puara.touch.feedback,
-  touchSurface: puara.touch.surface,
-  gamepadStyle: puara.touch.gamepadStyle,
+  touchSurface: surfaceOrRegions(puara.touch.surface, surfaces.catalog),
+  surfaces: surfaces.catalog,
+  surfaceParams: paramsFor(surfaces.catalog, puara.touch.surfaces, 'touch.surfaces'),
   ...puara.gestures,
   nativeParams: puara.nativeGestures,
   zones: puara.zones,
@@ -99,3 +142,15 @@ for (const zone of global.get('zones')) {
 }
 console.log(`- default: ${publicAddress}/`);
 console.log(`Controller dashboard: ${publicAddress}/controller`);
+
+// An artist saves a file in surfaces/ or surfaces/local/: rescan, keep every
+// setting that still fits, and the phones re-import the new version.
+watchSurfaces(async () => {
+  const { catalog, problems } = await loadSurfaces();
+  reportSurfaces(catalog, problems);
+  await global.set({
+    surfaces: catalog,
+    surfaceParams: paramsFor(catalog, global.get('surfaceParams'), 'live'),
+    touchSurface: surfaceOrRegions(global.get('touchSurface'), catalog),
+  });
+});

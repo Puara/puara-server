@@ -1,9 +1,9 @@
 // SharedState class descriptions — cf. https://soundworks.dev/api
 // Units and axis conventions are the OSC contract: see docs/NAMESPACE.md.
 
-import { SPLITS, SURFACES, DEFAULT_REGIONS } from './touch-layout.js';
+import { SPLITS, DEFAULT_REGIONS } from './touch-layout.js';
 import { TIMESTAMP_LEVELS } from './namespace.js';
-import { GAMEPAD_STYLES } from './gamepad.js';
+import { REGIONS_SURFACE } from './surfaces.js';
 
 // One `player` state per connected phone, owned by the phone.
 export const playerDescription = {
@@ -45,15 +45,19 @@ export const playerDescription = {
   // touching. Mirrors `touch` as one integer, so a piece can react to "which
   // panel" without duplicating the region math.
   region: { type: 'integer', default: -1, min: -1, max: 3 },
-  // ## virtual gamepad (touchSurface: 'gamepad'), see src/shared/gamepad.js
-  // Pressed buttons as a bitmask, bit n = W3C Standard Gamepad button n. An
-  // integer rather than an array so soundworks diffs it and a press costs a few
-  // bytes. Set from the pointer handler, not the tick: a press shorter than one
-  // tick would otherwise never leave the phone.
-  gamepadButtons: { type: 'integer', default: 0 },
-  // [leftX, leftY, rightX, rightY] in -1..1, +y down (W3C Gamepad API). Rides
-  // the tick like `touch`.
-  gamepadSticks: { type: 'any', default: [0, 0, 0, 0] },
+  // ## plugin surface outputs (surfaces/*.js, src/shared/surfaces.js)
+  // Which surface the two fields below belong to — '' for the regions, which
+  // have none. The bridge unpacks them with that surface's catalog entry, so a
+  // switch mid-press cannot be read against the wrong set of names.
+  surface: { type: 'string', default: '' },
+  // Pressed button outputs as a bitmask, bit n = the n-th `button` output in
+  // the surface's declaration order. An integer so soundworks diffs it and a
+  // press costs a few bytes. Set from the pointer handler, not the tick: a
+  // press shorter than one tick would otherwise never leave the phone.
+  surfaceButtons: { type: 'integer', default: 0 },
+  // Every `value` output, flattened in declaration order. Rides the tick like
+  // `touch`.
+  surfaceValues: { type: 'any', default: [] },
 
   // ## diagnostics
   // 0-1, -1 when the Battery API is unavailable (iOS Safari)
@@ -106,7 +110,8 @@ export const globalDescription = {
   streamRub: { type: 'boolean', default: true },
   streamButton: { type: 'boolean', default: true },
   streamRegion: { type: 'boolean', default: true },
-  streamGamepad: { type: 'boolean', default: true },
+  // the plugin surface's outputs (surfaces/*.js); was `streamGamepad`
+  streamSurface: { type: 'boolean', default: true },
 
   // Origin the QR codes point at, e.g. 'https://connect.sat.qc.ca:8000'. The
   // server seeds it from config/puara.yaml, falling back to its own LAN
@@ -143,11 +148,18 @@ export const globalDescription = {
   // ## touch surface design — authored on the dashboard, live on every phone.
   // See src/shared/touch-layout.js for the region ordering and geometry.
   touchSplit: { type: 'enum', list: SPLITS, default: 'single' },
-  // What the surface draws: the coloured regions or a virtual gamepad. The
-  // touch data is the same either way; `gamepad` adds buttons and sticks.
-  touchSurface: { type: 'enum', list: SURFACES, default: 'regions' },
-  // Look only — the OSC names are positional, so a patch survives a switch.
-  gamepadStyle: { type: 'enum', list: GAMEPAD_STYLES, default: 'playstation' },
+  // What the surface draws: 'regions' (the coloured split, built in) or the id
+  // of a plugin in `surfaces`. A string rather than an enum because the list
+  // is whatever is on disk. The touch data is the same whatever is drawn; a
+  // plugin adds its own outputs on top.
+  touchSurface: { type: 'string', default: REGIONS_SURFACE },
+  // The plugin catalog, filled by the server from surfaces/ and
+  // surfaces/local/ and refreshed when a file there changes: one JSON entry
+  // per surface — { id, label, description, source, url, params, outputs }.
+  surfaces: { type: 'any', default: [] },
+  // { [surfaceId]: { [param]: value } } — every surface's dashboard settings,
+  // kept for all of them so switching back and forth loses nothing.
+  surfaceParams: { type: 'any', default: {} },
   // Headline shown across the surface. Empty falls back to the built-in
   // bilingual "Touchez l'écran / Touch the screen" — an operator who types
   // their own text is on their own for translation.

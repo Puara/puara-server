@@ -15,6 +15,11 @@ export const strings = {
   dataRate: { fr: 'Envois/s', en: 'Sends/s' },
   dataBattery: { fr: 'Batterie', en: 'Battery' },
   dataPaused: { fr: 'Rien n’est envoyé pour le moment', en: 'Nothing is being sent right now' },
+  // a plugin surface that failed to load or crashed (surfaces/*.js)
+  surfaceFailed: {
+    fr: 'Cette surface n’a pas pu s’afficher',
+    en: 'This surface could not be shown',
+  },
   dataTouchPad: {
     fr: 'Touchez la zone ci-dessous — elle envoie comme l’onglet Jouer',
     en: 'Touch the area below — it sends just like the Play tab',

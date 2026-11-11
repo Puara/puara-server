@@ -15,12 +15,14 @@ import {
   regionCount,
 } from '../shared/touch-layout.js';
 import {
-  buttonLabel,
-  createGamepadInput,
-  gamepadLayout,
-  pressedButtons,
-} from '../shared/gamepad.js';
-import { renderGamepad } from '../shared/gamepad-view.js';
+  REGIONS_SURFACE,
+  buttonOutputs,
+  packOutputs,
+  valueLength,
+  valueOf,
+  valueOutputs,
+} from '../shared/surfaces.js';
+import { createSurface, loadSurfaceModule } from '../shared/surface-host.js';
 
 const TAP_MAX_DURATION = 250; // ms
 // low-pass coefficient for the gravity estimate; ~0.5 s time constant at 60 Hz
@@ -52,8 +54,9 @@ const DATA_ROWS = [
   { key: 'rub', label: 'rub', unit: '', stream: 'streamRub', modes: null },
   { key: 'button', label: 'button', unit: '', stream: 'streamButton', modes: null },
   { key: 'region', label: 'region', unit: '', stream: 'streamRegion', modes: null },
-  // `surface`: only sent while the touch surface is drawn as that
-  { key: 'gamepad', label: 'gamepad', unit: '', stream: 'streamGamepad', modes: null, surface: 'gamepad' },
+  // `plugin`: only sent while a plugin surface (surfaces/*.js) is drawn; the
+  // label becomes that surface's name
+  { key: 'surface', label: 'surface', unit: '', stream: 'streamSurface', modes: null, plugin: true },
 ];
 
 function formatNumber(value) {
@@ -191,8 +194,9 @@ async function main($container) {
   // and each normalizes against its own box.
   let cachedTarget = null;
   let cachedRect = null;
-  // The same element's padding box, which is what the gamepad is laid out in:
-  // the Data tab's pad has a border, and its children are positioned inside it.
+  // The same element's padding box, which is what a plugin surface is laid out
+  // in: the Data tab's pad has a border, and its children are positioned
+  // inside it.
   let cachedInner = null;
 
   function invalidateGeometry() {
@@ -316,84 +320,153 @@ async function main($container) {
     }
   }
 
-  // ## virtual gamepad — the same pointers, read a second way. Everything above
-  // still runs in gamepad mode, so `touch`, `tap`, brush/rub, button and
-  // `region` reach OSC exactly as with the regions drawn; the controller adds
-  // its buttons and sticks on top.
-  const gamepad = createGamepadInput();
-  // the mask last sent, which is also the one drawn as pressed
-  let gamepadMask = 0;
-  let layoutCache = { key: '', layout: null };
+  // ## plugin surfaces (surfaces/*.js) — the same pointers, read a second way.
+  // Everything above still runs whatever is drawn, so `touch`, `tap`,
+  // brush/rub, button and `region` reach OSC exactly as with the regions; a
+  // plugin adds its own outputs on top (src/shared/surfaces.js). The module is
+  // fetched from the server at runtime (src/shared/surface-host.js), so an
+  // artist's new file reaches the phones without a rebuild.
+  let plugin = null; // { entry, definition, instance } once loaded
+  let pluginStatus = 'none'; // 'none' | 'loading' | 'ready' | 'failed'
+  let pluginLoad = 0; // bumps on every switch, so a slow import cannot land late
+  // the button mask last sent, so a press goes out the moment it happens
+  let sentButtons = 0;
 
-  function gamepadActive() {
-    return global.get('touchSurface') === 'gamepad';
+  function pluginActive() {
+    return global.get('touchSurface') !== REGIONS_SURFACE;
   }
 
-  // memoized: hit-tested on every pointermove, and recomputed only on resize
-  function layoutFor(width, height) {
-    const key = `${width}x${height}`;
-    if (layoutCache.key !== key) {
-      layoutCache = { key, layout: width > 0 && height > 0 ? gamepadLayout(width, height) : null };
+  function pluginReady() {
+    return pluginStatus === 'ready';
+  }
+
+  function catalogEntry(id) {
+    return global.get('surfaces').find(entry => entry.id === id) || null;
+  }
+
+  function pluginParams() {
+    return plugin === null ? {} : global.get('surfaceParams')[plugin.entry.id] || {};
+  }
+
+  // A surface is the artist's code: one that throws must cost that surface,
+  // not the phone. The failure is drawn in its place and logged.
+  function failPlugin(err) {
+    console.error(`surface "${global.get('touchSurface')}" failed:`, err);
+    pluginStatus = 'failed';
+    // not now: this may be running inside renderApp(), via the surface's render()
+    setTimeout(renderApp, 0);
+  }
+
+  function callPlugin(method, ...args) {
+    if (!pluginReady() || typeof plugin.instance[method] !== 'function') {
+      return undefined;
     }
-    return layoutCache.layout;
-  }
-
-  // px in the target's padding box, the frame the layout was drawn in
-  function gamepadPoint(e) {
-    measure(e.currentTarget);
-    return {
-      layout: layoutFor(cachedInner.width, cachedInner.height),
-      x: e.clientX - cachedInner.left,
-      y: e.clientY - cachedInner.top,
-    };
-  }
-
-  // Straight to the DOM, like the rings: a knob follows every pointermove.
-  function positionKnobs() {
-    const feedback = global.get('touchFeedback');
-    for (const $stick of $container.querySelectorAll('.pad-stick')) {
-      const [vx, vy] = feedback ? gamepad.knob($stick.dataset.stick) : [0, 0];
-      const r = Number($stick.dataset.r);
-      $stick.firstElementChild.style.transform = `translate(${vx * r}px, ${vy * r}px)`;
+    try {
+      return plugin.instance[method](...args);
+    } catch (err) {
+      failPlugin(err);
+      return undefined;
     }
+  }
+
+  // Straight to the DOM, like the rings: a surface's paint() follows every
+  // pointermove (the gamepad's knobs, the xy-pad's dot).
+  function paintPlugin() {
+    for (const $root of $container.querySelectorAll('.surface-root')) {
+      callPlugin('paint', $root, { params: pluginParams(), feedback: $root.dataset.feedback === '1' });
+    }
+  }
+
+  function readPlugin() {
+    return packOutputs(plugin.entry, callPlugin('read'));
   }
 
   // Buttons leave the phone from here rather than from `tick()`: a press and
   // release inside one tick would leave the mask unchanged at both ends and the
   // press would never be sent — at a 10 Hz `sensorRate` that is any quick tap.
   // A mask change is rare enough that a render per change is affordable.
-  function syncGamepad() {
-    positionKnobs();
-    const mask = gamepad.buttons();
-    if (mask === gamepadMask) {
+  function syncPlugin() {
+    if (!pluginReady()) {
       return;
     }
-    gamepadMask = mask;
-    if (global.get('streamGamepad')) {
-      player.set({ gamepadButtons: mask });
+    const { buttons } = readPlugin();
+    if (buttons !== sentButtons) {
+      sentButtons = buttons;
+      if (global.get('streamSurface')) {
+        player.set({ surfaceButtons: buttons });
+      }
+      renderApp();
+    } else {
+      paintPlugin();
     }
-    renderApp();
   }
 
-  // Every way the controller can disappear from under a thumb — tab switch,
-  // panic, switching back to regions — ends here, and sends the release now
-  // even when paused: the alternative is a button held downstream until the
-  // show resumes.
-  function releaseGamepad() {
-    gamepad.clear();
-    positionKnobs();
+  // Every way a surface can disappear from under a thumb — tab switch, panic,
+  // switching surface — ends here, and sends the release now even when paused:
+  // the alternative is a button held downstream until the show resumes.
+  function releasePlugin() {
+    callPlugin('clear');
     const payload = {};
-    if (gamepadMask !== 0) {
-      gamepadMask = 0;
-      payload.gamepadButtons = 0;
+    if (sentButtons !== 0) {
+      sentButtons = 0;
+      payload.surfaceButtons = 0;
     }
-    // nothing to zero on a phone that has never sent a stick
-    if (lastSent.gamepadSticks !== undefined) {
-      addIfChanged(payload, 'gamepadSticks', [0, 0, 0, 0]);
+    // what clear() left read() at, which a well-behaved surface makes its rest
+    if (pluginReady() && lastSent.surfaceValues !== undefined) {
+      addIfChanged(payload, 'surfaceValues', readPlugin().values);
     }
-    if (Object.keys(payload).length > 0 && global.get('streamGamepad')) {
+    if (Object.keys(payload).length > 0 && global.get('streamSurface')) {
       player.set(payload);
     }
+    paintPlugin();
+  }
+
+  // Brings the phone onto whatever `touchSurface` names, (re)loading the module
+  // when the surface or its file changed.
+  async function switchPlugin() {
+    const id = global.get('touchSurface');
+    const entry = id === REGIONS_SURFACE ? null : catalogEntry(id);
+    if (plugin !== null && entry !== null && plugin.entry.url === entry.url && pluginStatus !== 'failed') {
+      // same file: only the catalog was refreshed
+      plugin.entry = entry;
+      return;
+    }
+
+    releasePlugin();
+    plugin = null;
+    delete lastSent.surfaceValues;
+    const load = ++pluginLoad;
+    // the outputs that follow belong to this surface from now on
+    player.set({ surface: entry === null ? '' : entry.id });
+
+    if (entry === null) {
+      pluginStatus = id === REGIONS_SURFACE ? 'none' : 'failed';
+      renderApp();
+      return;
+    }
+
+    pluginStatus = 'loading';
+    renderApp();
+    try {
+      const definition = await loadSurfaceModule(entry);
+      if (load !== pluginLoad) {
+        return;
+      }
+      plugin = { entry, definition, instance: null };
+      plugin.instance = createSurface(definition, pluginParams);
+      pluginStatus = 'ready';
+      renderApp();
+    } catch (err) {
+      if (load === pluginLoad) {
+        failPlugin(err);
+      }
+    }
+  }
+
+  // px in the target's padding box, the frame the surface was drawn in
+  function surfacePoint(e) {
+    measure(e.currentTarget);
+    return [e.clientX - cachedInner.left, e.clientY - cachedInner.top, cachedInner.width, cachedInner.height];
   }
 
   function onPointerDown(e) {
@@ -403,13 +476,10 @@ async function main($container) {
     }
     const position = pointerPosition(e);
     pointers.set(e.pointerId, position);
-    if (gamepadActive()) {
-      // the pressed button is the confirmation; a ring over it is clutter
-      const { layout, x, y } = gamepadPoint(e);
-      if (layout !== null) {
-        gamepad.down(layout, e.pointerId, x, y);
-        syncGamepad();
-      }
+    if (pluginActive()) {
+      // the surface draws its own confirmation; a ring over it is clutter
+      callPlugin('down', e.pointerId, ...surfacePoint(e));
+      syncPlugin();
     } else {
       addMark(e.pointerId, position);
     }
@@ -423,12 +493,9 @@ async function main($container) {
     }
     const position = pointerPosition(e);
     pointers.set(e.pointerId, position);
-    if (gamepadActive()) {
-      const { layout, x, y } = gamepadPoint(e);
-      if (layout !== null) {
-        gamepad.move(layout, e.pointerId, x, y);
-        syncGamepad();
-      }
+    if (pluginActive()) {
+      callPlugin('move', e.pointerId, ...surfacePoint(e));
+      syncPlugin();
     } else {
       moveMark(e.pointerId, position);
     }
@@ -437,9 +504,9 @@ async function main($container) {
 
   function onPointerUp(e) {
     pointers.delete(e.pointerId);
-    if (gamepadActive()) {
-      gamepad.up(e.pointerId);
-      syncGamepad();
+    if (pluginActive()) {
+      callPlugin('up', e.pointerId);
+      syncPlugin();
     }
     // tap stays an immediate event rather than waiting for the next tick
     if (pointers.size === 0 && performance.now() - touchStartTime < TAP_MAX_DURATION) {
@@ -543,10 +610,10 @@ async function main($container) {
     if (global.get('streamRegion')) {
       addIfChanged(payload, 'region', regionAt(primary, global.get('touchSplit')));
     }
-    // Sticks ride the tick like `touch`: a continuous value, of which only the
-    // latest matters. Outside gamepad mode they sit at 0 and send nothing.
-    if (global.get('streamGamepad') && gamepadActive()) {
-      addIfChanged(payload, 'gamepadSticks', gamepad.sticks());
+    // Value outputs ride the tick like `touch`: continuous, of which only the
+    // latest matters. With the regions drawn there are none.
+    if (global.get('streamSurface') && pluginReady() && valueLength(plugin.entry) > 0) {
+      addIfChanged(payload, 'surfaceValues', readPlugin().values);
     }
 
     // ## raw streams — mode-gated, and only what is enabled. Still one batched
@@ -632,21 +699,40 @@ async function main($container) {
     return label ? `${index} · ${label}` : String(index);
   }
 
-  // Labels as drawn on this phone's controller, then both sticks.
-  function formatGamepad() {
-    const style = global.get('gamepadStyle');
-    const names = pressedButtons(player.get('gamepadButtons'))
-      .map(name => buttonLabel(style, name));
-    const [lx, ly, rx, ry] = player.get('gamepadSticks').map(formatNumber);
-    return `${names.join(' ') || '—'}  L[${lx} ${ly}] R[${rx} ${ry}]`;
+  // What the phone last sent, unpacked by name; the surface's own format() if
+  // it has one (the gamepad shows its button labels), else names and numbers.
+  function formatSurface() {
+    if (!pluginReady()) {
+      return '—';
+    }
+    const { entry, definition } = plugin;
+    const outputs = {};
+    const mask = player.get('surfaceButtons');
+    buttonOutputs(entry).forEach(({ name }, bit) => {
+      outputs[name] = (mask >> bit) & 1;
+    });
+    for (const output of valueOutputs(entry)) {
+      const value = valueOf(output, player.get('surfaceValues'));
+      outputs[output.name] = output.size === 1 ? value[0] : value;
+    }
+    if (typeof definition.format === 'function') {
+      try {
+        return definition.format({ outputs, params: pluginParams() });
+      } catch (err) {
+        console.error('surface format() failed:', err);
+      }
+    }
+    const pressed = buttonOutputs(entry).filter(({ name }) => outputs[name]).map(({ name }) => name);
+    const values = valueOutputs(entry).map(({ name }) => `${name}[${formatValue(outputs[name])}]`);
+    return [pressed.join(' ') || '—', ...values].join('  ');
   }
 
   function formatRow(key) {
     switch (key) {
       case 'region':
         return formatRegion(player.get('region'));
-      case 'gamepad':
-        return formatGamepad();
+      case 'surface':
+        return formatSurface();
       default:
         return formatValue(player.get(key));
     }
@@ -658,13 +744,13 @@ async function main($container) {
     const sending = running
       && global.get(row.stream)
       && (row.modes === null || row.modes.includes(mode))
-      && (row.surface === undefined || global.get('touchSurface') === row.surface);
+      && (!row.plugin || pluginActive());
 
     const value = sending ? formatRow(row.key) : tt('dataOff');
 
     return html`
       <li class="data-row ${sending ? '' : 'muted'}">
-        <span class="data-label">${row.label}</span>
+        <span class="data-label">${row.plugin && pluginActive() ? global.get('touchSurface') : row.label}</span>
         <span class="data-value">${value}</span>
         <span class="data-unit">${sending ? row.unit : ''}</span>
       </li>`;
@@ -728,8 +814,9 @@ async function main($container) {
   // The sub-areas are painted by a grid *behind* the surface with
   // `pointer-events: none`, so the pointer handlers stay on the one parent
   // element and multi-touch tracking does not have to be split per cell.
-  // The gamepad is laid out in px against the element it is drawn in, so it
-  // needs that element's size before it can draw — and again on every rotation.
+  // A plugin surface is laid out in px against the element it is drawn in, so
+  // it needs that element's size before it can draw — and again on every
+  // rotation.
   // Sizes come from a ResizeObserver rather than a read during render.
   const surfaceSizes = new Map(); // data-surface -> [width, height]
   const observed = new Set();
@@ -767,15 +854,23 @@ async function main($container) {
   // `highlight` as for renderRegionGrid(): the surface gates the pressed state
   // on `touchFeedback`, the Data tab's pad always shows it.
   function renderSurfaceContent(surface, highlight) {
-    if (!gamepadActive()) {
+    if (!pluginActive()) {
       return renderRegionGrid(global.get('touchSplit'), highlight);
     }
+    if (pluginStatus === 'loading') {
+      return html`<p class="surface-message">…</p>`;
+    }
+    if (!pluginReady()) {
+      return html`<p class="surface-message">${tt('surfaceFailed')}</p>`;
+    }
     const [width, height] = surfaceSizes.get(surface) || [0, 0];
-    return renderGamepad(
-      layoutFor(width, height),
-      global.get('gamepadStyle'),
-      highlight ? gamepadMask : 0,
-    );
+    const drawing = width > 0 && height > 0
+      ? callPlugin('render', { width, height, params: pluginParams(), feedback: highlight })
+      : nothing;
+    return html`
+      <div class="surface-root" data-feedback="${highlight ? '1' : '0'}"
+        style="position:absolute; inset:0; pointer-events:none;"
+      >${drawing ?? nothing}</div>`;
   }
 
   function renderTouchSurface() {
@@ -790,7 +885,7 @@ async function main($container) {
       >
         ${renderSurfaceContent('surface', global.get('touchFeedback'))}
         <div class="touch-marks"></div>
-        ${gamepadActive() ? nothing : html`<p class="touch-hint">${text || tt('touchHint')}</p>`}
+        ${pluginActive() ? nothing : html`<p class="touch-hint">${text || tt('touchHint')}</p>`}
       </div>`;
   }
 
@@ -800,7 +895,7 @@ async function main($container) {
   // surface's corners.
   function renderDataTouchpad() {
     return html`
-      <div class="data-touchpad ${gamepadActive() ? 'gamepad-pad' : ''}" data-surface="pad"
+      <div class="data-touchpad ${pluginActive() ? 'plugin-pad' : ''}" data-surface="pad"
         @pointerdown="${onPointerDown}"
         @pointermove="${onPointerMove}"
         @pointerup="${onPointerUp}"
@@ -822,7 +917,7 @@ async function main($container) {
     lastTouchTarget = target;
     pointers.clear();
     clearMarks();
-    releaseGamepad();
+    releasePlugin();
     pressedRegion = -1;
     // whatever the pointers were measured against is gone or replaced
     invalidateGeometry();
@@ -878,6 +973,7 @@ async function main($container) {
       </div>
     `, $container);
     observeSurfaces();
+    paintPlugin();
   }
 
   // ## haptic cue
@@ -919,17 +1015,16 @@ async function main($container) {
     }
     // Fingers already down stay down — the touch data does not care what is
     // drawn — but whatever they held on the old surface is let go: rings when
-    // the gamepad appears, buttons and sticks when it goes.
-    if ('touchSurface' in updates) {
+    // a plugin appears, its buttons and values when it goes. An edited surface
+    // file (new catalog url) is re-imported the same way.
+    if ('touchSurface' in updates || 'surfaces' in updates) {
       clearMarks();
-      releaseGamepad();
+      switchPlugin();
     }
     renderApp();
-    if (updates.touchFeedback === false) {
-      positionKnobs();
-    }
   });
 
+  switchPlugin();
   renderApp();
 }
 

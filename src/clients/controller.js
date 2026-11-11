@@ -1,7 +1,7 @@
 import '@soundworks/helpers/polyfills.js';
 import { Client } from '@soundworks/core/client.js';
 import { loadConfig, launcher } from '@soundworks/helpers/browser.js';
-import { html, render } from 'lit';
+import { html, nothing, render } from 'lit';
 import QRCode from 'qrcode';
 
 import '@ircam/sc-components/sc-bang.js';
@@ -16,13 +16,12 @@ import '@ircam/sc-components/sc-toggle.js';
 import { tt } from '../shared/strings.js';
 import {
   SPLITS,
-  SURFACES,
   gridGeometry,
   normalizeRegions,
   regionCount,
 } from '../shared/touch-layout.js';
-import { GAMEPAD_STYLES, gamepadLayout } from '../shared/gamepad.js';
-import { renderGamepad } from '../shared/gamepad-view.js';
+import { REGIONS_SURFACE, normalizeParams } from '../shared/surfaces.js';
+import { createSurface, loadSurfaceModule } from '../shared/surface-host.js';
 import { NATIVE_PARAMS, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { TIMESTAMP_LEVELS } from '../shared/namespace.js';
 
@@ -42,7 +41,7 @@ const STREAM_TOGGLES = [
   ['streamRub', 'rub'],
   ['streamButton', 'button'],
   ['streamRegion', 'region'],
-  ['streamGamepad', 'gamepad'],
+  ['streamSurface', 'surface'],
 ];
 
 // inside of the phone-shaped preview: .touch-preview in app.scss, less its border
@@ -192,6 +191,10 @@ async function main($container) {
         @change="${e => write(key, e.detail.value)}"
       ></sc-number>`));
 
+  // plugin surface previews, see previewOf(); up here because the QR codes
+  // below render the page before the rest of main() has run
+  const previews = new Map(); // url -> { loading } | { instance } | { error }
+
   // ## per-zone QR codes
   // Built from `publicAddress`, NOT window.location.origin — the dashboard is
   // often open on localhost, which no phone can reach. Rebuilt whenever the
@@ -230,16 +233,111 @@ async function main($container) {
     global.set({ touchRegions: regions });
   }
 
-  // Phone-shaped preview, using the same geometry helper the players do, so what
-  // the operator sees here is what the audience gets.
-  function renderTouchPreview() {
-    if (global.get('touchSurface') === 'gamepad') {
-      return html`
-        <div class="touch-preview">
-          ${renderGamepad(gamepadLayout(...PREVIEW_SIZE), global.get('gamepadStyle'), 0)}
-        </div>`;
-    }
+  // ## plugin surfaces (surfaces/*.js)
+  function catalogEntry(id) {
+    return global.get('surfaces').find(entry => entry.id === id) || null;
+  }
 
+  function paramsOf(entry) {
+    return normalizeParams(entry, global.get('surfaceParams')[entry.id]);
+  }
+
+  // `surfaceParams` is one `any` object — every edit is a read-modify-write.
+  function setSurfaceParam(entry, key, value) {
+    const all = { ...global.get('surfaceParams') };
+    all[entry.id] = { ...paramsOf(entry), [key]: value };
+    global.set({ surfaceParams: all });
+  }
+
+  // The surface's own controls, built from its `params` declaration.
+  function renderSurfaceParam(entry, key, spec) {
+    const value = paramsOf(entry)[key];
+    const set = next => setSurfaceParam(entry, key, next);
+    switch (spec.type) {
+      case 'enum':
+        // sc-select hands back strings; map them onto the declared values
+        return controlRow(spec.label, html`
+          <sc-select
+            .options="${Object.fromEntries(spec.list.map(item => [String(item), String(item)]))}"
+            value="${String(value)}"
+            @change="${e => set(spec.list.find(item => String(item) === e.detail.value))}"
+          ></sc-select>`);
+      case 'boolean':
+        return controlRow(spec.label, html`
+          <sc-toggle ?active="${value}" @change="${e => set(e.detail.value)}"></sc-toggle>`);
+      case 'number':
+        return controlRow(spec.label, html`
+          <sc-number
+            min="${spec.min ?? -Infinity}"
+            max="${spec.max ?? Infinity}"
+            step="${spec.step ?? 0.01}"
+            value="${value}"
+            @change="${e => set(e.detail.value)}"
+          ></sc-number>`);
+      case 'color':
+        return controlRow(spec.label, html`
+          <sc-color-picker value="${value}" @change="${e => set(e.detail.value)}"></sc-color-picker>`);
+      default:
+        return controlRow(spec.label, html`
+          <sc-text editable value="${value}" @change="${e => set(e.detail.value)}"></sc-text>`);
+    }
+  }
+
+  // The preview draws the surface with the same module the phones load, so what
+  // the operator sees is what the audience gets. One instance per file version
+  // (`previews`, declared with the QR codes: both are read by the first render).
+  function previewOf(entry) {
+    const cached = previews.get(entry.url);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const pending = { loading: true };
+    previews.set(entry.url, pending);
+    loadSurfaceModule(entry)
+      .then(definition => {
+        previews.set(entry.url, { instance: createSurface(definition, () => paramsOf(entry)) });
+      })
+      .catch(err => {
+        previews.set(entry.url, { error: err.message });
+      })
+      .finally(renderApp);
+    return pending;
+  }
+
+  function renderPluginPreview(entry) {
+    const preview = previewOf(entry);
+    let drawing = nothing;
+    if (preview.error) {
+      drawing = html`<p class="surface-message error">${preview.error}</p>`;
+    } else if (preview.instance) {
+      try {
+        const [width, height] = PREVIEW_SIZE;
+        drawing = preview.instance.render({ width, height, params: paramsOf(entry), feedback: false });
+      } catch (err) {
+        drawing = html`<p class="surface-message error">${err.message}</p>`;
+      }
+    }
+    return html`<div class="touch-preview">${drawing}</div>`;
+  }
+
+  // the addresses the surface adds, so the operator can wire a patch from here
+  function renderOutputs(entry) {
+    if (entry.outputs.length === 0) {
+      return nothing;
+    }
+    return html`
+      <p class="hint">
+        ${entry.outputs.map(({ name, type, size }) => html`
+          <code>/puara/audience/&lt;id&gt;/${entry.id}/${name}</code>
+          ${type === 'button' ? 'i (0/1)' : 'f'.repeat(size)}<br>`)}
+        audience: <code>/puara/audience/global/${entry.id}/…</code>
+        (<code>…/count</code> per button, the mean per value)
+      </p>`;
+  }
+
+  // Phone-shaped preview of the regions, using the same geometry helper the
+  // players do.
+  function renderTouchPreview() {
     const { cols, rows } = gridGeometry(global.get('touchSplit'));
     const text = global.get('touchText').trim();
 
@@ -320,49 +418,77 @@ async function main($container) {
       </section>`;
   }
 
+  // The dropdown lists the built-in regions and every plugin on disk
+  // (surfaces/, surfaces/local/), refreshed live when a file there changes.
+  function surfaceOptions() {
+    const options = { [`${REGIONS_SURFACE} (built in)`]: REGIONS_SURFACE };
+    for (const entry of global.get('surfaces')) {
+      const name = entry.label === entry.id ? entry.id : `${entry.label} — ${entry.id}`;
+      options[entry.source === 'local' ? `${name} (local)` : name] = entry.id;
+    }
+    return options;
+  }
+
+  function renderRegionControls() {
+    return html`
+      <p class="hint">
+        Regions are numbered left-to-right then top-to-bottom, and that index
+        is what the bridge sends as <code>/puara/audience/&lt;id&gt;/region</code>
+        (the <code>region</code> stream). Touch feedback (a ring under the
+        finger, the pressed region dimmed) happens on the phones only; the
+        preview shows the design, not the interaction.
+      </p>
+      ${selectRow('split', 'touchSplit', SPLITS)}
+      ${textRow('text (blank = FR/EN default)', 'touchText')}
+      ${toggleRow('touch feedback', 'touchFeedback')}
+      ${visibleRegions().map((region, index) => html`
+        <div class="control-row">
+          <sc-text>region ${index}</sc-text>
+          <sc-text
+            editable
+            value="${region.label}"
+            @change="${e => setRegion(index, { label: e.detail.value })}"
+          ></sc-text>
+          <sc-color-picker
+            value="${region.color}"
+            @change="${e => setRegion(index, { color: e.detail.value })}"
+          ></sc-color-picker>
+        </div>`)}
+      ${renderTouchPreview()}`;
+  }
+
+  function renderPluginControls(entry) {
+    return html`
+      ${entry.description ? html`<p class="hint">${entry.description}</p>` : nothing}
+      ${renderOutputs(entry)}
+      ${Object.entries(entry.params).map(([key, spec]) => renderSurfaceParam(entry, key, spec))}
+      ${toggleRow('touch feedback', 'touchFeedback')}
+      ${renderPluginPreview(entry)}`;
+  }
+
   function renderTouchPanel() {
-    // the controller is not drawn from the split, so its controls go with it
-    const gamepad = global.get('touchSurface') === 'gamepad';
+    const surface = global.get('touchSurface');
+    const entry = surface === REGIONS_SURFACE ? null : catalogEntry(surface);
     return html`
       <section class="panel touch-panel">
         <h2>Touch surface</h2>
         <p class="hint">
-          Applies live to every connected phone. Regions are numbered
-          left-to-right then top-to-bottom, and that index is what the bridge
-          sends as <code>/puara/audience/&lt;id&gt;/region</code> — enable the
-          <code>region</code> stream above to emit it. Touch feedback (a ring
-          under the finger, the pressed region dimmed) happens on the phones
-          only; the preview below shows the design, not the interaction.
+          Applies live to every connected phone. Whatever is drawn, the touch
+          streams above keep flowing (<code>touch</code>, <code>tap</code>,
+          brush/rub, <code>button</code>, and <code>region</code>, which
+          follows the split last chosen for the regions). A plugin surface adds
+          its own addresses under the <code>surface</code> stream. Surfaces are
+          the files in <code>surfaces/</code> and <code>surfaces/local/</code>
+          on the server — add one there and it appears in this list
+          (<code>surfaces/README.md</code>).
         </p>
-        <p class="hint">
-          <code>gamepad</code> draws a virtual controller instead of the regions.
-          Every touch stream above keeps flowing unchanged (<code>region</code>
-          keeps the split last chosen for the regions, though it is not drawn);
-          the controller adds <code>/puara/audience/&lt;id&gt;/gamepad/…</code>
-          on top, under the <code>gamepad</code> stream. The style is the look
-          only — OSC names are positional, so a patch survives a switch.
-        </p>
-        ${selectRow('surface', 'touchSurface', SURFACES)}
-        ${gamepad
-          ? selectRow('gamepad style', 'gamepadStyle', GAMEPAD_STYLES)
-          : html`
-            ${selectRow('split', 'touchSplit', SPLITS)}
-            ${textRow('text (blank = FR/EN default)', 'touchText')}`}
-        ${toggleRow('touch feedback', 'touchFeedback')}
-        ${gamepad ? '' : visibleRegions().map((region, index) => html`
-          <div class="control-row">
-            <sc-text>region ${index}</sc-text>
-            <sc-text
-              editable
-              value="${region.label}"
-              @change="${e => setRegion(index, { label: e.detail.value })}"
-            ></sc-text>
-            <sc-color-picker
-              value="${region.color}"
-              @change="${e => setRegion(index, { color: e.detail.value })}"
-            ></sc-color-picker>
-          </div>`)}
-        ${renderTouchPreview()}
+        ${controlRow('surface', html`
+          <sc-select
+            .options="${surfaceOptions()}"
+            value="${surface}"
+            @change="${e => global.set({ touchSurface: e.detail.value })}"
+          ></sc-select>`)}
+        ${entry === null ? renderRegionControls() : renderPluginControls(entry)}
       </section>`;
   }
 

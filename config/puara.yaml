@@ -60,8 +60,9 @@ streams:
   rub: true
   button: true
   region: true
-  # virtual gamepad buttons and sticks (touch.surface: gamepad)
-  gamepad: true
+  # the outputs of a plugin surface (touch.surface: gamepad, xy-pad, your own):
+  # /puara/audience/<id>/<surface>/... — was `gamepad` before namespace 0.6.0
+  surface: true
 
 # Origin the QR codes point at. Leave blank and the server uses its own LAN
 # address (env serverAddress, else the first non-internal IPv4 interface) —
@@ -101,17 +102,26 @@ touch:
     - { label: '', color: '#6b5a1b' }
 
   # What the surface draws:
-  #   regions = the coloured split above
+  #   regions = the coloured split above (built in)
   #   gamepad = a virtual game controller (d-pad, face buttons, two sticks,
   #             shoulders, select/start), like an emulator's touch overlay
-  # The touch data is the same either way — touch, tap, brush/rub, button and
-  # region keep flowing. gamepad adds /puara/audience/<id>/gamepad/... on top
-  # (streams.gamepad). See docs/NAMESPACE.md "Virtual gamepad".
+  #   xy-pad  = one big pad: finger position and press
+  #   or the name of any file in surfaces/ or surfaces/local/ (your own
+  #   surfaces — see surfaces/README.md). An unknown name falls back to
+  #   regions with a warning.
+  # The touch data is the same whatever is drawn — touch, tap, brush/rub,
+  # button and region keep flowing. A plugin surface adds
+  # /puara/audience/<id>/<surface>/... on top (streams.surface). See
+  # docs/NAMESPACE.md "Touch surfaces".
   surface: regions
 
-  # playstation (✕ ○ □ △) or xbox (A B X Y). The look only — OSC names are
-  # positional (south/east/west/north), so patches survive a switch.
-  gamepadStyle: playstation
+  # Starting settings for each plugin surface, by name — the same controls the
+  # dashboard shows under it. Anything left out takes the surface's default.
+  surfaces:
+    gamepad:
+      # playstation (✕ ○ □ △) or xbox (A B X Y). The look only — OSC names are
+      # positional (south/east/west/north), so patches survive a switch.
+      style: playstation
 
   # On-screen confirmation of a touch: a thin ring under the finger, brightening
   # once the payload has actually left the phone, and the pressed region dimmed.

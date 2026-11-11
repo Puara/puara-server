@@ -5,8 +5,9 @@
 // reports must be the one the finger visually landed on, which only holds if
 // the renderer and the hit test read the same geometry.
 //
-// Pure functions and plain data — no DOM — so the dashboard preview, the player
-// and a node test can all drive it.
+// Pure functions and plain data — no DOM — so the phone, the dashboard preview
+// and the server (which imports surfaces/gamepad.js to read its outputs) can all
+// load it. Part of the gamepad surface plugin: see surfaces/gamepad.js.
 
 export const GAMEPAD_STYLES = ['playstation', 'xbox'];
 

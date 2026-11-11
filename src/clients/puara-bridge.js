@@ -13,7 +13,13 @@ import {
   global as globalNs,
 } from '../shared/namespace.js';
 import { MAX_REGIONS, regionCount } from '../shared/touch-layout.js';
-import { GAMEPAD_BUTTONS, GAMEPAD_STICKS } from '../shared/gamepad.js';
+import {
+  REGIONS_SURFACE,
+  buttonOutputs,
+  valueLength,
+  valueOf,
+  valueOutputs,
+} from '../shared/surfaces.js';
 import { flatten, nativeAddress, NATIVE_ROOT } from '../shared/native-gestures.js';
 import { loadAddon } from '../shared/native-addon.js';
 
@@ -178,71 +184,92 @@ async function bootstrap() {
     enqueueDevice(device.buttonPressTime(id), f(button.pressTime));
   }
 
-  // ## virtual gamepad
-  // Last buttons and sticks per player, so a press goes out as the one button
-  // that changed rather than the whole mask, and a phone that drops out
-  // mid-press can be released downstream instead of leaving a held note.
-  const gamepads = new Map(); // player id -> { buttons, sticks }
+  // ## plugin surfaces (surfaces/*.js)
+  // A phone sends its surface's outputs packed (src/shared/surfaces.js): one
+  // bitmask for the buttons, one flat array for the values, and the name of
+  // the surface they belong to. Unpacked here with that surface's catalog
+  // entry, a press goes out as the one button that changed, and a phone that
+  // switches surface or drops out mid-press is released downstream instead of
+  // leaving a held note.
+  function catalogEntry(surface) {
+    return globalState.get('surfaces').find(entry => entry.id === surface) || null;
+  }
 
-  function gamepadOf(id) {
-    let pad = gamepads.get(id);
-    if (pad === undefined) {
-      pad = { buttons: 0, sticks: [0, 0, 0, 0] };
-      gamepads.set(id, pad);
+  const held = new Map(); // player id -> { surface, buttons, values }
+
+  // 0 for every button held and every value away from 0, on the surface they
+  // were held on
+  function releaseHeld(id, state) {
+    const entry = state.surface ? catalogEntry(state.surface) : null;
+    if (entry === null || !globalState.get('streamSurface')) {
+      return;
     }
-    return pad;
+    buttonOutputs(entry).forEach(({ name }, bit) => {
+      if (state.buttons & (1 << bit)) {
+        enqueueDevice(device.surfaceOutput(id, entry.id, name), i(0));
+      }
+    });
+    for (const output of valueOutputs(entry)) {
+      if (valueOf(output, state.values).some(value => value !== 0)) {
+        enqueueDevice(device.surfaceOutput(id, entry.id, output.name), ...valueOf(output, []).map(f));
+      }
+    }
   }
 
   // Tracks the truth whatever the toggle says, and only emits under it, so
   // switching the stream back on diffs against what the phone really holds.
-  function emitGamepad(id, updates) {
-    const pad = gamepadOf(id);
-    const enabled = globalState.get('streamGamepad');
+  function emitSurface(id, player, updates) {
+    let state = held.get(id);
+    if (state === undefined) {
+      // first word from this phone since the bridge started: if this update is
+      // not itself the surface change, the phone is already on its surface
+      state = { surface: 'surface' in updates ? '' : player.get('surface'), buttons: 0, values: [] };
+      held.set(id, state);
+    }
+    if ('surface' in updates && updates.surface !== state.surface) {
+      releaseHeld(id, state);
+      state = { surface: updates.surface, buttons: 0, values: [] };
+      held.set(id, state);
+    }
 
-    if ('gamepadButtons' in updates) {
-      const changed = pad.buttons ^ updates.gamepadButtons;
-      pad.buttons = updates.gamepadButtons;
+    const entry = state.surface ? catalogEntry(state.surface) : null;
+    const enabled = entry !== null && globalState.get('streamSurface');
+
+    if ('surfaceButtons' in updates) {
+      const changed = state.buttons ^ updates.surfaceButtons;
+      state.buttons = updates.surfaceButtons;
       if (enabled && changed) {
-        for (const { name, bit } of GAMEPAD_BUTTONS) {
+        buttonOutputs(entry).forEach(({ name }, bit) => {
           if (changed & (1 << bit)) {
-            enqueueDevice(device.gamepadButton(id, name), i((pad.buttons >> bit) & 1));
+            enqueueDevice(device.surfaceOutput(id, entry.id, name), i((state.buttons >> bit) & 1));
           }
-        }
+        });
       }
     }
 
-    if (updates.gamepadSticks != null) {
-      const previous = pad.sticks;
-      pad.sticks = updates.gamepadSticks;
+    if (updates.surfaceValues != null) {
+      const previous = state.values;
+      state.values = updates.surfaceValues;
       if (enabled) {
-        GAMEPAD_STICKS.forEach((side, n) => {
-          const [x, y] = pad.sticks.slice(2 * n, 2 * n + 2);
-          if (x !== previous[2 * n] || y !== previous[2 * n + 1]) {
-            enqueueDevice(device.gamepadStick(id, side), f(x), f(y));
+        for (const output of valueOutputs(entry)) {
+          const now = valueOf(output, state.values);
+          const before = valueOf(output, previous);
+          if (now.some((value, n) => value !== before[n])) {
+            enqueueDevice(device.surfaceOutput(id, entry.id, output.name), ...now.map(f));
           }
-        });
+        }
       }
     }
   }
 
   // A phone gone mid-press: zero what it held. `/status 0` says it left, but a
   // patch bound to `gamepad/south` would otherwise keep sounding.
-  function releaseGamepad(id) {
-    const pad = gamepads.get(id);
-    gamepads.delete(id);
-    if (pad === undefined || !globalState.get('streamGamepad')) {
-      return;
+  function releaseSurface(id) {
+    const state = held.get(id);
+    held.delete(id);
+    if (state !== undefined) {
+      releaseHeld(id, state);
     }
-    for (const { name, bit } of GAMEPAD_BUTTONS) {
-      if (pad.buttons & (1 << bit)) {
-        enqueueDevice(device.gamepadButton(id, name), i(0));
-      }
-    }
-    GAMEPAD_STICKS.forEach((side, n) => {
-      if (pad.sticks[2 * n] !== 0 || pad.sticks[2 * n + 1] !== 0) {
-        enqueueDevice(device.gamepadStick(id, side), f(0), f(0));
-      }
-    });
   }
 
   players.onUpdate((player, updates) => {
@@ -269,7 +296,7 @@ async function bootstrap() {
     }
     // like `region`, a descriptor of the touch rather than a raw stream: every
     // interaction mode, not gated by emitRaw
-    emitGamepad(id, updates);
+    emitSurface(id, player, updates);
     // events always pass, whatever the mode — they are what scales
     if (updates.tap) {
       tapLog.push([Date.now(), player.get('zone')]);
@@ -284,43 +311,58 @@ async function bootstrap() {
 
   // ## aggregates at a fixed tick — often what the piece actually consumes
 
-  // Emitted only while the surface is a gamepad: 16 addresses per tick for a
-  // controller nobody is holding is noise. The tick after it stops being one
-  // sends a last round of zeros, so a patch is not left latched on the counts
-  // from the moment the operator switched back to regions.
-  let gamepadAggregatesLive = false;
+  // The active plugin surface across the audience: per button output, how many
+  // phones hold it; per value output, the mean over the phones drawing that
+  // surface. Only while a plugin is drawn and its stream is on — a dozen
+  // addresses per tick for a surface nobody holds is noise. The tick after it
+  // stops (stream off, back to the regions, another surface) sends one last
+  // round of zeros, so a patch is not left latched on the last counts.
+  let aggregated = null; // catalog entry aggregated on the previous tick
 
-  function computeGamepadAggregates() {
-    const live = globalState.get('streamGamepad')
-      && globalState.get('touchSurface') === 'gamepad';
-    if (!live && !gamepadAggregatesLive) {
+  function sendSurfaceAggregates(entry, counts, means) {
+    buttonOutputs(entry).forEach(({ name }, bit) => {
+      enqueue(globalNs.surfaceCount(entry.id, name), i(counts[bit] || 0));
+    });
+    for (const output of valueOutputs(entry)) {
+      enqueue(globalNs.surfaceMean(entry.id, output.name), ...valueOf(output, means).map(f));
+    }
+  }
+
+  function computeSurfaceAggregates() {
+    const surface = globalState.get('touchSurface');
+    const entry = surface !== REGIONS_SURFACE && globalState.get('streamSurface')
+      ? catalogEntry(surface)
+      : null;
+
+    if (aggregated !== null && aggregated.id !== entry?.id) {
+      sendSurfaceAggregates(aggregated, [], []);
+    }
+    aggregated = entry;
+    if (entry === null) {
       return;
     }
-    gamepadAggregatesLive = live;
 
-    const counts = new Array(GAMEPAD_BUTTONS.length).fill(0);
-    const sums = [0, 0, 0, 0];
-    if (live) {
-      players.forEach(player => {
-        const buttons = player.get('gamepadButtons');
-        GAMEPAD_BUTTONS.forEach(({ bit }, n) => {
-          if (buttons & (1 << bit)) {
-            counts[n] += 1;
-          }
-        });
-        player.get('gamepadSticks').forEach((value, n) => {
-          sums[n] += value;
-        });
+    const counts = new Array(buttonOutputs(entry).length).fill(0);
+    const sums = new Array(valueLength(entry)).fill(0);
+    let drawing = 0;
+    players.forEach(player => {
+      // a phone still loading the surface, or on the old one, is not counted
+      if (player.get('surface') !== entry.id) {
+        return;
+      }
+      drawing += 1;
+      const mask = player.get('surfaceButtons');
+      counts.forEach((_, bit) => {
+        if (mask & (1 << bit)) {
+          counts[bit] += 1;
+        }
       });
-    }
-
-    GAMEPAD_BUTTONS.forEach(({ name }, n) => {
-      enqueue(globalNs.gamepadCount(name), i(counts[n]));
+      const values = player.get('surfaceValues') || [];
+      sums.forEach((_, n) => {
+        sums[n] += Number.isFinite(values[n]) ? values[n] : 0;
+      });
     });
-    const mean = value => (players.size ? value / players.size : 0);
-    GAMEPAD_STICKS.forEach((side, n) => {
-      enqueue(globalNs.gamepadStick(side), f(mean(sums[2 * n])), f(mean(sums[2 * n + 1])));
-    });
+    sendSurfaceAggregates(entry, counts, sums.map(sum => (drawing ? sum / drawing : 0)));
   }
 
   function computeAggregates() {
@@ -461,7 +503,7 @@ async function bootstrap() {
     const id = player.get('id');
     enqueueDevice(device.status(id), i(0));
     enqueue(meta.connected(), i(players.size));
-    releaseGamepad(id);
+    releaseSurface(id);
 
     // the descriptors carry accumulated state; a rejoining phone starts clean
     banks.delete(id);
@@ -525,7 +567,7 @@ async function bootstrap() {
 
   setInterval(() => {
     computeAggregates();
-    computeGamepadAggregates();
+    computeSurfaceAggregates();
     runNativeGestures();
     flush();
   }, 1000 / puara.bridgeTick);
