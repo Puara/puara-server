@@ -60,8 +60,11 @@ git clone --recursive https://github.com/Puara/puara-gestures ../puara-gestures
 ./scripts/start.sh --dump  # ...and an oscdump on the first OSC port
 ```
 
+On Windows the same steps are `scripts\install.cmd` and `scripts\start.cmd`.
+
 `install.sh` looks for puara-gestures **beside this repo**. Point it elsewhere
-with `PUARA_GESTURES_PATH=/path/to/clone ./scripts/install.sh`.
+with `PUARA_GESTURES_PATH=/path/to/clone ./scripts/install.sh` (Windows:
+`set PUARA_GESTURES_PATH=C:\path\to\clone` before `scripts\install.cmd`).
 
 To test unmerged library work instead of whatever `main` holds, assemble a branch
 from the PRs you care about — this also clones the checkout if it is missing, so

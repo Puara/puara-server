@@ -1,0 +1,95 @@
+# Runs the install and start scripts the way a person would, on Linux, macOS
+# and Windows: assemble the puara-gestures checkout the addon needs, install,
+# check what the installer produced, then start the stack, fetch the pages and
+# stop it (.github/scripts/smoke.mjs).
+#
+# macOS runs the scripts under /bin/bash, the 3.2 every Mac ships, rather than
+# the newer bash the runner puts first on the PATH: that is the one users have.
+
+name: Install
+
+on:
+  push:
+    branches: [main, gesture-tester]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install + start (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      # gh, in combine-gestures-prs.sh, reads the puara-gestures PR list
+      GH_TOKEN: ${{ github.token }}
+      # the installers write their logs to the temp dir; keep them where the
+      # failure upload below can find them
+      TMPDIR: ${{ runner.temp }}
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
+    steps:
+      # boost, inside puara-gestures' 3rdparty submodule, has paths longer
+      # than Windows' default 260-character limit
+      - name: Allow long paths (Windows)
+        if: runner.os == 'Windows'
+        run: git config --system core.longpaths true
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # The addon uses descriptors that are still open puara-gestures PRs, so
+      # main alone does not compile; same command as docs/GESTURE-TESTER.md.
+      - name: Assemble puara-gestures beside this repo
+        shell: bash
+        run: |
+          git config --global user.name "puara-server CI"
+          git config --global user.email "ci@users.noreply.github.com"
+          ${{ runner.os == 'macOS' && '/bin/bash' || 'bash' }} ./scripts/combine-gestures-prs.sh --all --exclude 135
+
+      - name: Install (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/install.sh
+
+      - name: Install (macOS)
+        if: runner.os == 'macOS'
+        run: /bin/bash ./scripts/install.sh
+
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: scripts\install.cmd
+
+      - name: Check what the installer produced
+        shell: bash
+        run: |
+          status=0
+          for f in .build/server.js .build/public/player.js config/env-dev.yaml \
+                   native/build/Release/puara_gestures.node; do
+            if [ -f "$f" ]; then echo "ok       $f"; else echo "MISSING  $f"; status=1; fi
+          done
+          ls certs/
+          exit $status
+
+      - name: Start, fetch the pages, stop
+        env:
+          REQUIRE_ADDON: '1'
+        run: node .github/scripts/smoke.mjs
+
+      - name: Upload installer logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-logs-${{ matrix.os }}
+          path: ${{ runner.temp }}/puara-*.log
+          if-no-files-found: ignore

@@ -25,6 +25,7 @@ on `/puara/gestures/...`.
 - [`gh`](https://cli.github.com), authenticated (`gh auth login`) — it reads the
   PR list and titles from the puara-gestures repo
 - a C++ toolchain, if you pass `--build` (same requirement as `install.sh`)
+- bash: the one Linux has, macOS's own 3.2, or Git Bash on Windows
 
 Run it from anywhere; it locates this repo from its own path.
 

@@ -106,35 +106,67 @@ installations; the full contract lives in [`docs/NAMESPACE.md`](docs/NAMESPACE.m
 
 ## Getting started
 
-Two scripts cover a Linux workstation or show machine end to end. No sudo.
+Two scripts cover a workstation or show machine end to end, on Linux, macOS
+and Windows. No sudo or administrator rights. The only prerequisite is
+[Node.js](https://nodejs.org) ≥ 18 (the LTS installer is fine).
+
+Linux and macOS:
 
 ```sh
 ./scripts/install.sh     # dependencies, mkcert, LAN certificate, env, build
 ./scripts/start.sh       # soundworks server + OSC bridge, Ctrl-C stops both
 ```
 
-`install.sh` is **safe to rerun**: each step checks its own result and skips.
+Windows (Command Prompt or PowerShell, from the repo folder):
+
+```bat
+scripts\install.cmd
+scripts\start.cmd
+```
+
+The `.cmd` files run `scripts\install.ps1` / `scripts\start.ps1` without
+changing the machine's PowerShell execution policy. Windows options are
+PowerShell-style: `-NoHttps`, `-Env default`, `-NoBridge`, `-Dump`, `-ServeCa`.
+
+The install scripts are **safe to rerun**: each step checks its own result and skips.
 Nothing existing is overwritten — neither `certs/*.pem` nor
 `config/env-dev.yaml`. Delete the file yourself to have it regenerated. What it
 does: verifies Node ≥ 18 · `npm ci` (the exact versions in `package-lock.json`)
-· fetches mkcert to `~/.local/bin` (checksum-pinned) if missing · issues a
+· fetches mkcert (checksum-pinned) to `~/.local/bin`, or
+`%LOCALAPPDATA%\puara-server\bin` on Windows, if missing · issues a
 certificate for the detected LAN IP, hostname and localhost · writes
-`config/env-dev.yaml` pointing at it · builds.
-Use `--no-https` for a desktop-only setup (no phone sensors).
+`config/env-dev.yaml` pointing at it · builds the C++ addon if it can · builds.
+Use `--no-https` (`-NoHttps` on Windows) for a desktop-only setup (no phone
+sensors).
+
+Per-OS notes:
+
+- **macOS** — the addon needs the Xcode command line tools
+  (`xcode-select --install`). If the firewall is on, allow incoming
+  connections for `node` when asked.
+- **Windows** — the addon needs Visual Studio Build Tools with *Desktop
+  development with C++* and Python 3 (the Node.js installer's *Tools for Native
+  Modules* option installs both). Windows Firewall asks about Node.js on first
+  start: allow it on **Private** networks, and set the venue network's profile
+  to Private. `combine-gestures-prs.sh` runs in Git Bash. `-Dump` needs
+  `oscdump` (liblo) on the PATH, which Windows rarely has — use ossia score or
+  the dashboard instead.
+- On all three the addon is optional: without it the server and bridge run,
+  minus `/puara/gestures`.
 
 Dependency versions are pinned by the committed `package-lock.json`. To move
 them, run `npm install <pkg>@<version>` (or `npm update`), test, and commit the
 lockfile with it.
 
-`start.sh` flags:
+`start.sh` flags (`start.cmd` equivalents in brackets):
 
 | flag | effect |
 |---|---|
 | *(none)* | `ENV=dev` (HTTPS) if `config/env-dev.yaml` exists, else `default` (HTTP) |
-| `--env <name>` | pick `config/env-<name>.yaml` explicitly |
-| `--no-bridge` | server only |
-| `--dump` | also run `oscdump` on the first configured OSC port |
-| `--serve-ca` | serve the mkcert root CA over HTTP :8001 so a phone can install it |
+| `--env <name>` (`-Env <name>`) | pick `config/env-<name>.yaml` explicitly |
+| `--no-bridge` (`-NoBridge`) | server only |
+| `--dump` (`-Dump`) | also run `oscdump` on the first configured OSC port |
+| `--serve-ca` (`-ServeCa`) | serve the mkcert root CA over HTTP :8001 so a phone can install it |
 
 Manual equivalent, if you prefer separate terminals:
 
@@ -154,8 +186,9 @@ npm run bridge     # in a second terminal: OSC bridge (after `npm run build`)
 
 ### Connecting a real phone
 
-1. `./scripts/install.sh`, then `./scripts/start.sh`.
-2. `./scripts/start.sh --serve-ca` in another terminal, open that URL on the
+1. `./scripts/install.sh`, then `./scripts/start.sh` (Windows:
+   `scripts\install.cmd`, then `scripts\start.cmd`).
+2. `./scripts/start.sh --serve-ca` (`scripts\start.cmd -ServeCa`) in another terminal, open that URL on the
    phone, install the CA. On iOS also enable it under Settings → General →
    About → Certificate Trust Settings — the install alone is not enough, and
    without it `wss://` fails silently while the page still loads. Stop serving

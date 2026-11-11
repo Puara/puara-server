@@ -48,6 +48,9 @@ module.exports = {
   imuSource: path.join(root, '3rdparty', 'IMU_Sensor_Fusion', 'imu_orientation.cpp'),
   // gyp refuses to build a source given as an absolute path outside the project
   // ("No rule to make target"), but takes a relative one that climbs out of it.
+  // forward slashes: gyp reads this as a source path on every OS, and on
+  // Windows path.relative() would hand it backslashes
   imuSourceRelative: path.relative(
-    __dirname, path.join(root, '3rdparty', 'IMU_Sensor_Fusion', 'imu_orientation.cpp')),
+    __dirname, path.join(root, '3rdparty', 'IMU_Sensor_Fusion', 'imu_orientation.cpp'))
+    .split(path.sep).join('/'),
 };

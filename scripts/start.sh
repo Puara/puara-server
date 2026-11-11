@@ -2,6 +2,8 @@
 #
 # puara-server — start the show stack: soundworks server + OSC bridge.
 #
+# Linux and macOS (bash 3.2 is enough); on Windows use scripts\start.cmd.
+#
 # Both run in this one terminal; Ctrl-C stops both. ENV defaults to `dev`
 # (HTTPS, written by scripts/install.sh) and falls back to `default` (plain
 # HTTP, desktop testing only) when config/env-dev.yaml is absent.
@@ -34,15 +36,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$(uname -s)" in
+  Linux|Darwin) ;;
+  *) echo "unsupported system: $(uname -s). On Windows, run scripts\\start.cmd." >&2; exit 1 ;;
+esac
+
 cd "$REPO_ROOT"
 
 info() { printf '\033[1m%s\033[0m\n' "$1"; }
 warn() { printf '\033[33m! %s\033[0m\n' "$1"; }
 
+# skips docker/VM/VPN adapters; shared with install.sh and the Windows scripts
 detect_lan_ip() {
-  ip -4 -o addr show scope global 2>/dev/null \
-    | grep -vE '\b(docker|br-|virbr|veth|tailscale)' \
-    | awk '{print $4}' | cut -d/ -f1 | head -1
+  node scripts/lan-ip.mjs
 }
 
 # ------------------------------------------------------- serve the root CA
@@ -50,14 +56,11 @@ detect_lan_ip() {
 # over a certificate signed by that same CA. Only the public certificate is
 # exposed here, never the CA private key.
 if [ "$SERVE_CA_ONLY" -eq 1 ]; then
-  command -v mkcert >/dev/null 2>&1 || { echo "mkcert not found — run ./scripts/install.sh" >&2; exit 1; }
-  CAROOT="$(mkcert -CAROOT)"
+  MKCERT="$(command -v mkcert || echo "${HOME}/.local/bin/mkcert")"
+  [ -x "$MKCERT" ] || { echo "mkcert not found — run ./scripts/install.sh" >&2; exit 1; }
+  CAROOT="$("$MKCERT" -CAROOT)"
   [ -f "${CAROOT}/rootCA.pem" ] || { echo "no rootCA.pem in ${CAROOT}" >&2; exit 1; }
 
-  SERVE_DIR="$(mktemp -d)"
-  trap 'rm -rf "$SERVE_DIR"' EXIT
-  # .crt is the extension both iOS and Android recognize on download
-  cp "${CAROOT}/rootCA.pem" "${SERVE_DIR}/rootCA.crt"
   LAN_IP="$(detect_lan_ip || echo 127.0.0.1)"
 
   info "Serving the mkcert root CA on http://${LAN_IP}:${CA_PORT}/rootCA.crt"
@@ -70,8 +73,7 @@ if [ "$SERVE_CA_ONLY" -eq 1 ]; then
   warn "HTTPS site to that phone. Own test devices only; remove it afterwards."
   echo
   echo "  Ctrl-C to stop serving (do that as soon as the phone is enrolled)."
-  cd "$SERVE_DIR"
-  exec python3 -m http.server "$CA_PORT" --bind "$LAN_IP"
+  exec node scripts/serve-ca.mjs "${CAROOT}/rootCA.pem" "$LAN_IP" "$CA_PORT"
 fi
 
 # -------------------------------------------------------------- env pick
@@ -122,7 +124,7 @@ fi
 # -------------------------------------------------------------- oscdump
 if [ "$RUN_DUMP" -eq 1 ]; then
   if ! command -v oscdump >/dev/null 2>&1; then
-    warn "oscdump not found (apt install liblo-tools) — skipping --dump"
+    warn "oscdump not found (apt install liblo-tools, or brew install liblo) — skipping --dump"
   else
     OSC_PORT="$(node -e "
       import('./src/shared/load-puara-config.js')

@@ -19,7 +19,18 @@
       "xcode_settings": {
         "CLANG_CXX_LANGUAGE_STANDARD": "c++20",
         "GCC_ENABLE_CPP_EXCEPTIONS": "YES"
-      }
+      },
+      "msvs_settings": {
+        "VCCLCompilerTool": {
+          "ExceptionHandling": 1,
+          "AdditionalOptions": ["/std:c++20", "/Zc:__cplusplus", "/bigobj", "/utf-8"]
+        }
+      },
+      "conditions": [
+        ["OS=='win'", {
+          "defines": ["_USE_MATH_DEFINES", "NOMINMAX"]
+        }]
+      ]
     }
   ]
 }

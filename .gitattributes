@@ -1,0 +1,6 @@
+# Shell scripts must keep LF everywhere: a Windows checkout with core.autocrlf
+# would otherwise give them CRLF, and bash (Git Bash included) then fails on
+# the stray \r. Batch files are the reverse - cmd.exe misreads some LF-only
+# files, so they are checked out with CRLF on every OS.
+*.sh   text eol=lf
+*.cmd  text eol=crlf

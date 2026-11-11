@@ -22,7 +22,8 @@
 #   # see the plan, change nothing
 #   ./scripts/combine-gestures-prs.sh --all -x 135 --dry-run
 #
-# Requires: git, gh (authenticated).
+# Requires: git, gh (authenticated). Runs on Linux, on macOS's own bash 3.2
+# (so no mapfile or associative arrays here) and in Git Bash on Windows.
 
 set -euo pipefail
 
@@ -139,8 +140,13 @@ if [[ ${#WANT[@]} -eq 0 ]]; then
 fi
 
 if [[ $ALL -eq 1 ]]; then
-  mapfile -t OPEN < <(gh pr list --repo "$GESTURES_REPO" --state open --limit 100 \
-                        --json number -q '.[].number')
+  OPEN=()
+  while IFS= read -r n; do
+    if [[ -n "$n" ]]; then
+      OPEN+=("$n")
+    fi
+  done < <(gh pr list --repo "$GESTURES_REPO" --state open --limit 100 \
+             --json number -q '.[].number')
   [[ ${#OPEN[@]} -gt 0 ]] || die "no open PRs found in $GESTURES_REPO"
   WANT+=("${OPEN[@]}")
 fi
@@ -159,15 +165,20 @@ for n in "${WANT[@]}"; do
   [[ $skip -eq 1 ]] || PRS+=("$n")
 done
 [[ ${#PRS[@]} -gt 0 ]] || die "PR set is empty after exclusions"
-mapfile -t PRS < <(printf '%s\n' "${PRS[@]}" | sort -n)
+SORTED=()
+while IFS= read -r n; do
+  SORTED+=("$n")
+done < <(printf '%s\n' "${PRS[@]}" | sort -n)
+PRS=("${SORTED[@]}")
 
-# Titles for readable merge commit messages (one API call, tolerate misses).
-declare -A TITLE=()
-while IFS=$'\t' read -r num title; do
-  [[ -n "${num:-}" ]] && TITLE["$num"]="$title"
-done < <(gh pr list --repo "$GESTURES_REPO" --state all --limit 200 \
-           --json number,title \
-           --template '{{range .}}{{.number}}{{"\t"}}{{.title}}{{"\n"}}{{end}}')
+# Titles for readable merge commit messages (one API call, tolerate misses),
+# kept as "number<TAB>title" lines rather than an associative array.
+TITLES="$(gh pr list --repo "$GESTURES_REPO" --state all --limit 200 \
+            --json number,title \
+            --template '{{range .}}{{.number}}{{"\t"}}{{.title}}{{"\n"}}{{end}}' || true)"
+pr_title() {
+  printf '%s\n' "$TITLES" | awk -F '\t' -v n="$1" '$1 == n { sub(/^[^\t]*\t/, ""); print; exit }'
+}
 
 info "library:  $GESTURES_REPO"
 info "checkout: $GESTURES_PATH"
@@ -180,7 +191,8 @@ info ""
 if [[ $DRY_RUN -eq 1 ]]; then
   info "dry run — merge order would be:"
   for n in "${PRS[@]}"; do
-    info "  #$n  ${TITLE[$n]:-<unknown title>}"
+    title="$(pr_title "$n")"
+    info "  #$n  ${title:-<unknown title>}"
   done
   [[ -d "$GESTURES_PATH/.git" ]] || info "(checkout would be cloned first)"
   exit 0
@@ -255,7 +267,7 @@ git -C "$GESTURES_PATH" checkout --quiet -B "$BRANCH" "$BASE"
 
 declare -a MERGED=()
 for n in "${PRS[@]}"; do
-  title="${TITLE[$n]:-}"
+  title="$(pr_title "$n")"
   msg="Merge PR #$n${title:+: $title}"
   if git -C "$GESTURES_PATH" merge --no-ff --quiet -m "$msg" \
        "refs/remotes/pr/$n" >/dev/null 2>&1; then
@@ -301,13 +313,15 @@ info "$GESTURES_PATH is on '$BRANCH': ${#MERGED[@]} $noun merged, $added files a
 if [[ $BUILD -eq 1 ]]; then
   info ""
   info "rebuilding the addon ..."
+  ADDON_LOG="${TMPDIR:-/tmp}"
+  ADDON_LOG="${ADDON_LOG%/}/puara-addon-build.log"
   if PUARA_GESTURES_PATH="$GESTURES_PATH" npm --prefix "$SERVER_ROOT" \
-       run build:native >/tmp/puara-addon-build.log 2>&1; then
+       run build:native >"$ADDON_LOG" 2>&1; then
     info "addon built — start with ./scripts/start.sh"
   else
-    info "addon build FAILED — see /tmp/puara-addon-build.log"
+    info "addon build FAILED — see $ADDON_LOG"
     info "the merge itself is fine; this is a compile error in the combined set"
-    tail -20 /tmp/puara-addon-build.log >&2
+    tail -20 "$ADDON_LOG" >&2
     exit 1
   fi
 else
