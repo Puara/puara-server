@@ -553,6 +553,53 @@ body.loading {
     margin: 4px 0;
   }
 
+  // the show's on/off, first on the page: green running, red stopped, so the
+  // state reads from across the room
+  .run-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 20px 16px;
+    border: 3px solid transparent;
+    border-radius: 10px;
+    cursor: pointer;
+    color: #fff;
+    font-family: inherit;
+    transition: background-color 120ms linear, border-color 120ms linear;
+
+    .run-state {
+      font-size: 3.2rem;
+      font-weight: bold;
+      letter-spacing: 0.12em;
+    }
+
+    .run-action {
+      font-size: 1.4rem;
+      opacity: 0.85;
+    }
+
+    &.running {
+      background-color: #2e7d32;
+      border-color: #4caf50;
+    }
+
+    &.stopped {
+      background-color: #8e2424;
+      border-color: #e05555;
+    }
+
+    &:hover {
+      filter: brightness(1.12);
+    }
+
+    &:focus-visible {
+      outline: 3px solid #fff;
+      outline-offset: 3px;
+    }
+  }
+
   .zone-counts {
     list-style: none;
     padding: 0;

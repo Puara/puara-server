@@ -259,6 +259,26 @@ async function main($container) {
   }
 
   // ## panels
+  // First on the page and as wide as it, because the phones send nothing until
+  // it is on and it is the one control an operator forgets. The colour says
+  // the state, the label says what a click will do.
+  function renderRunning() {
+    const running = global.get('running');
+    return html`
+      <section class="panel run-panel">
+        <button
+          class="run-button ${running ? 'running' : 'stopped'}"
+          aria-pressed="${running ? 'true' : 'false'}"
+          @click="${() => global.set({ running: !running })}"
+        >
+          <span class="run-state">${running ? 'RUNNING' : 'STOPPED'}</span>
+          <span class="run-action">${running
+            ? 'phones are sending — click to pause them all'
+            : 'phones send nothing — click to start'}</span>
+        </button>
+      </section>`;
+  }
+
   function renderAudience() {
     const counts = {};
     players.forEach(p => {
@@ -282,7 +302,6 @@ async function main($container) {
       <section class="panel">
         <h2>Global controls</h2>
         ${textRow('public address (QR)', 'publicAddress', value => value.trim())}
-        ${toggleRow('running', 'running')}
         ${textRow('scene', 'scene')}
         ${controlRow('sensorRate (Hz)', html`
           <sc-slider
@@ -302,6 +321,8 @@ async function main($container) {
   }
 
   function renderTouchPanel() {
+    // the controller is not drawn from the split, so its controls go with it
+    const gamepad = global.get('touchSurface') === 'gamepad';
     return html`
       <section class="panel touch-panel">
         <h2>Touch surface</h2>
@@ -316,21 +337,19 @@ async function main($container) {
         <p class="hint">
           <code>gamepad</code> draws a virtual controller instead of the regions.
           Every touch stream above keeps flowing unchanged (<code>region</code>
-          still follows the split, though it is not drawn); the controller adds
-          <code>/puara/audience/&lt;id&gt;/gamepad/…</code> on top, under the
-          <code>gamepad</code> stream. The style is the look only — OSC names
-          are positional, so a patch survives a switch.
+          keeps the split last chosen for the regions, though it is not drawn);
+          the controller adds <code>/puara/audience/&lt;id&gt;/gamepad/…</code>
+          on top, under the <code>gamepad</code> stream. The style is the look
+          only — OSC names are positional, so a patch survives a switch.
         </p>
         ${selectRow('surface', 'touchSurface', SURFACES)}
-        ${global.get('touchSurface') === 'gamepad'
+        ${gamepad
           ? selectRow('gamepad style', 'gamepadStyle', GAMEPAD_STYLES)
-          : ''}
-        ${selectRow('split', 'touchSplit', SPLITS)}
-        ${global.get('touchSurface') === 'gamepad'
-          ? ''
-          : textRow('text (blank = FR/EN default)', 'touchText')}
+          : html`
+            ${selectRow('split', 'touchSplit', SPLITS)}
+            ${textRow('text (blank = FR/EN default)', 'touchText')}`}
         ${toggleRow('touch feedback', 'touchFeedback')}
-        ${visibleRegions().map((region, index) => html`
+        ${gamepad ? '' : visibleRegions().map((region, index) => html`
           <div class="control-row">
             <sc-text>region ${index}</sc-text>
             <sc-text
@@ -506,6 +525,7 @@ async function main($container) {
           <h1>${client.config.app.name} | ${client.role}</h1>
           <sw-audit .client="${client}"></sw-audit>
         </header>
+        ${renderRunning()}
         ${renderAudience()}
         ${renderGlobalControls()}
         ${renderTouchPanel()}

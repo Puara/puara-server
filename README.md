@@ -1,15 +1,6 @@
-# puara-server — `gesture-tester` branch
+# puara-server
 
-> **This is not `main`.** This branch is a permanent test bench for
-> [puara-gestures](https://github.com/Puara/puara-gestures): the bridge runs the
-> real C++ descriptors, compiled from a checkout of that library, alongside the JS
-> ports the phones compute — same input, both implementations, emitted under
-> `/puara/gestures/…` and `/puara/audience/…` so they can be compared. It carries
-> a native build step and a dependency on a sibling repository, which is why it
-> stays off `main`. See **[docs/GESTURE-TESTER.md](docs/GESTURE-TESTER.md)**.
->
-> Everything below describes the audience system, which behaves here exactly as it
-> does on `main`.
+[![Install](https://github.com/Puara/puara-server/actions/workflows/install.yml/badge.svg)](https://github.com/Puara/puara-server/actions/workflows/install.yml)
 
 Browser-based audience interaction system for the
 [Satosphère](https://sat.qc.ca/) — the SAT's 18 m immersive dome.
@@ -25,6 +16,13 @@ This repository is **reusable infrastructure**, not a one-off piece: residency
 artists configure interaction modes, zones, rates and OSC destinations in one
 YAML file ([`config/puara.yaml`](config/puara.yaml)) without touching
 framework internals.
+
+The bridge can also run the real C++
+[puara-gestures](https://github.com/Puara/puara-gestures) descriptors next to
+the JS ports the phones compute — same input, both implementations, under
+`/puara/gestures/…` and `/puara/audience/…` — through an optional Node addon
+built from a checkout of that library. Without it, everything else runs as
+usual. See [docs/GESTURE-TESTER.md](docs/GESTURE-TESTER.md).
 
 ## Screenshots
 
@@ -195,7 +193,8 @@ npm run bridge     # in a second terminal: OSC bridge (after `npm run build`)
    once enrolled.
 3. Open the player URL, tap **Commencer / Start** — that gesture is what
    triggers the iOS motion permission prompt.
-4. On the dashboard, switch `running` on. Sensors are gated on it.
+4. On the dashboard, click the red **STOPPED** button at the top so it turns
+   green (**RUNNING**). Sensors are gated on it.
 
 Installing a local CA on a phone means whoever holds the CA private key
 (`$(mkcert -CAROOT)/rootCA-key.pem`, on the server) can impersonate any HTTPS
@@ -305,7 +304,9 @@ the one drawn under the finger.
 
 - **The touch data does not change.** `touch`, `touch/<n>`, `tap`,
   `brush`/`rub`, `button` and `region` are computed from the same pointers as
-  with the regions drawn (`region` keeps following the split, invisibly).
+  with the regions drawn (`region` keeps following the split, invisibly; the dashboard hides
+  the split and region editors while the gamepad is shown, so `region` uses the
+  split last chosen for the regions).
 - **The controller adds its own**, under `streams.gamepad`:
   `/puara/audience/<id>/gamepad/<button> i` (`1` press, `0` release) for
   `south east west north l1 r1 l2 r2 select start dpad/up dpad/down dpad/left
@@ -364,13 +365,13 @@ src/
     ├── gamepad-view.js       # its lit drawing (player + dashboard preview)
     ├── strings.js            # FR/EN UI strings
     └── load-puara-config.js  # config/puara.yaml loader (node side)
-native/                       # gesture-tester branch: the puara-gestures addon
+native/                       # optional: the puara-gestures C++ addon
 ├── binding.gyp               # C++20 build against a puara-gestures checkout
 ├── gestures-path.cjs         # where that checkout is
 └── src/puara_addon.cpp       # one descriptor bank per phone
 docs/
 ├── NAMESPACE.md              # the OSC contract (versioned, currently 0.5.0)
-├── GESTURE-TESTER.md         # this branch: running the C++ library live
+├── GESTURE-TESTER.md         # running the C++ library live (the addon)
 ├── DEPLOYMENT.md             # certs, DNS, WiFi notes
 └── images/                   # README screenshots
 ```

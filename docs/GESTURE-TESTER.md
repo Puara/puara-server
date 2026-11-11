@@ -1,10 +1,11 @@
 # gesture-tester — puara-server as a test bench for puara-gestures
 
-This branch turns puara-server into a live test platform for
-[puara-gestures](https://github.com/Puara/puara-gestures). It is a **permanent
-parallel branch**, not a candidate for `main`: it carries a native build step and
-a dependency on a checkout of another repository, neither of which belongs in the
-audience system a show runs on.
+puara-server doubles as a live test platform for
+[puara-gestures](https://github.com/Puara/puara-gestures). This started on a
+separate `gesture-tester` branch; it is now part of `main`, as an **optional**
+native addon: the install scripts build it when a puara-gestures checkout and a
+C++ compiler are available, and without it the audience system runs exactly as
+before (the bridge says so at startup).
 
 Which library code is under test is whatever branch your puara-gestures checkout
 is on. To test unmerged work, build a branch from the PRs you want with
