@@ -30,12 +30,17 @@ jobs:
     env:
       # gh, in combine-gestures-prs.sh, reads the puara-gestures PR list
       GH_TOKEN: ${{ github.token }}
-      # the installers write their logs to the temp dir; keep them where the
-      # failure upload below can find them
-      TMPDIR: ${{ runner.temp }}
-      TEMP: ${{ runner.temp }}
-      TMP: ${{ runner.temp }}
     steps:
+      # The installers write their logs to the temp dir; point every OS's
+      # notion of it at the runner's, where the failure upload can find them.
+      # (A step, because job-level env cannot read the runner context.)
+      - name: Use the runner temp dir
+        shell: bash
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
       # boost, inside puara-gestures' 3rdparty submodule, has paths longer
       # than Windows' default 260-character limit
       - name: Allow long paths (Windows)
