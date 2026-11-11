@@ -5,8 +5,9 @@
 # machine's PowerShell execution policy.
 #
 # Safe to rerun: every step checks its own result first and skips if already
-# done. Nothing that already exists is overwritten - not the certificate, not
-# config\env-dev.yaml. Delete the file yourself if you want it regenerated.
+# done. config\env-dev.yaml is written once and kept. The certificate in certs\
+# is reissued only when it no longer fits this machine (scripts/https.mjs,
+# which start.ps1 also runs), always with the same mkcert CA.
 #
 # No administrator rights needed. mkcert lands in %LOCALAPPDATA%\puara-server\bin.
 #
@@ -32,8 +33,6 @@ $MkcertSha256 = @{
 $NodeMinMajor = 18
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$CertDir = Join-Path $RepoRoot 'certs'
-$EnvFile = Join-Path $RepoRoot 'config\env-dev.yaml'
 $ToolsDir = Join-Path $env:LOCALAPPDATA 'puara-server\bin'
 $AddonLog = Join-Path $env:TEMP 'puara-addon-build.log'
 $BuildLog = Join-Path $env:TEMP 'puara-build.log'
@@ -49,12 +48,6 @@ function Fail([string]$Message) { Write-Host $Message -ForegroundColor Red; exit
 function Invoke-Logged([string]$CommandLine, [string]$Log) {
   cmd.exe /d /c "$CommandLine > `"$Log`" 2>&1"
   return $LASTEXITCODE
-}
-
-# Text for a single-quoted YAML scalar: forward slashes, which Node accepts on
-# Windows, and doubled single quotes.
-function ConvertTo-YamlPath([string]$Path) {
-  return ($Path -replace '\\', '/') -replace "'", "''"
 }
 
 Set-Location $RepoRoot
@@ -83,14 +76,6 @@ if ($LASTEXITCODE -ne 0) {
   Fail 'npm ci failed. If it says EPERM or EBUSY, stop any running server and rerun.'
 }
 Ok 'node_modules ready'
-
-# ------------------------------------------------------- LAN IP detection
-# Skips Hyper-V/WSL, VirtualBox, VMware and VPN adapters - phones need the
-# real interface address. Shared with the macOS/Linux scripts.
-$LanIp = "$(& node scripts/lan-ip.mjs)".Trim()
-if ($LASTEXITCODE -ne 0) {
-  $LanIp = ''
-}
 
 # --------------------------------------------------------------- mkcert
 $Mkcert = $null
@@ -131,61 +116,15 @@ if (-not $NoHttps) {
     Ok "mkcert installed to $Mkcert"
   }
 
-  # ------------------------------------------------------ certificate
-  Step 'Issuing the LAN certificate'
-  New-Item -ItemType Directory -Force -Path $CertDir | Out-Null
-  $Existing = Get-ChildItem -Path $CertDir -Filter '*.pem' |
-    Where-Object { $_.Name -notlike '*-key.pem' } | Select-Object -First 1
-
-  if ($Existing) {
-    Skip "certificate already present: $($Existing.Name)"
-    Skip 'delete certs\*.pem and rerun to reissue (phones keep trusting the same CA)'
-    $CertFile = $Existing.FullName
-  } elseif (-not $LanIp) {
-    Warn 'no LAN IP detected - skipping certificate. Connect to a network and rerun.'
-    $CertFile = ''
-  } else {
-    $HostName = [System.Net.Dns]::GetHostName().ToLower()
-    Push-Location $CertDir
-    try {
-      & $Mkcert $LanIp "$HostName.local" $HostName localhost 127.0.0.1
-    } finally {
-      Pop-Location
-    }
-    if ($LASTEXITCODE -ne 0) {
-      Fail 'mkcert could not issue the certificate.'
-    }
-    $Issued = Get-ChildItem -Path $CertDir -Filter '*.pem' |
-      Where-Object { $_.Name -notlike '*-key.pem' } | Select-Object -First 1
-    $CertFile = $Issued.FullName
-    Ok "certificate issued for $LanIp"
-  }
-
-  # --------------------------------------------------- env-dev.yaml
-  Step 'Writing config\env-dev.yaml'
-  if (Test-Path $EnvFile) {
-    Skip 'config\env-dev.yaml exists - left untouched'
-  } elseif (-not $CertFile) {
-    Warn 'no certificate, so no env-dev.yaml - rerun once you have a LAN IP'
-  } else {
-    $KeyFile = $CertFile -replace '\.pem$', '-key.pem'
-    $Yaml = @(
-      'type: development',
-      'port: 8000',
-      "serverAddress: '$LanIp'",
-      'useHttps: true',
-      'httpsInfos:',
-      "  cert: '$(ConvertTo-YamlPath $CertFile)'",
-      "  key: '$(ConvertTo-YamlPath $KeyFile)'",
-      "baseUrl: ''",
-      'auth:',
-      '  clients: []',
-      "  login: ''",
-      "  password: ''"
-    ) -join "`n"
-    # WriteAllText: UTF-8 without the BOM that 5.1's Set-Content would add
-    [System.IO.File]::WriteAllText($EnvFile, "$Yaml`n")
-    Ok 'config\env-dev.yaml written (gitignored)'
+  # ------------------------------------- env-dev.yaml + certificate
+  # Shared with start.ps1 and the macOS/Linux scripts: writes
+  # config\env-dev.yaml if it is missing, then issues the certificate for this
+  # machine's LAN address, host name and localhost - or reissues it when it no
+  # longer fits.
+  Step 'Setting up HTTPS (config\env-dev.yaml, certificate)'
+  & node scripts/https.mjs --init --mkcert $Mkcert
+  if ($LASTEXITCODE -ne 0) {
+    Fail 'could not set up the certificate - see above.'
   }
 } else {
   Step 'Skipping HTTPS setup (-NoHttps)'

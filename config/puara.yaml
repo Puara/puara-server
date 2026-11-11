@@ -65,10 +65,11 @@ streams:
   surface: true
 
 # Origin the QR codes point at. Leave blank and the server uses its own LAN
-# address (env serverAddress, else the first non-internal IPv4 interface) —
+# address, found again at every start (skipping docker, VM and VPN adapters) —
 # never the dashboard's own URL, which is usually localhost and unreachable
 # from a phone. Set this when a hostname points at the server, e.g.
-# 'https://connect.sat.qc.ca:8000'. Editable live from the dashboard.
+# 'https://connect.sat.qc.ca:8000'; the start scripts then make sure the
+# certificate in certs/ covers that host too. Editable live from the dashboard.
 publicAddress: ''
 
 # Upper bound on simultaneous pointers reported per phone.

@@ -93,6 +93,13 @@ fi
 [ -f ".build/server.js" ] \
   || { echo ".build/server.js missing — run npm run build (or ./scripts/install.sh)" >&2; exit 1; }
 
+# ---------------------------------------------------------- certificate
+# A new network, a new machine or a copied folder leaves the certificate
+# without the address phones now use, and they refuse it. Reissued here with
+# the same mkcert CA, so phones that trusted it still do (scripts/https.mjs).
+node scripts/https.mjs --env "$ENV_NAME" \
+  || warn "HTTPS not set up for this address — phones may refuse the connection"
+
 # ------------------------------------------------------------- teardown
 PIDS=()
 cleanup() {

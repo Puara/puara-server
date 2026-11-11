@@ -127,15 +127,25 @@ changing the machine's PowerShell execution policy. Windows options are
 PowerShell-style: `-NoHttps`, `-Env default`, `-NoBridge`, `-Dump`, `-ServeCa`.
 
 The install scripts are **safe to rerun**: each step checks its own result and skips.
-Nothing existing is overwritten — neither `certs/*.pem` nor
-`config/env-dev.yaml`. Delete the file yourself to have it regenerated. What it
-does: verifies Node ≥ 18 · `npm ci` (the exact versions in `package-lock.json`)
-· fetches mkcert (checksum-pinned) to `~/.local/bin`, or
-`%LOCALAPPDATA%\puara-server\bin` on Windows, if missing · issues a
-certificate for the detected LAN IP, hostname and localhost · writes
-`config/env-dev.yaml` pointing at it · builds the C++ addon if it can · builds.
-Use `--no-https` (`-NoHttps` on Windows) for a desktop-only setup (no phone
-sensors).
+What they do: verify Node ≥ 18 · `npm ci` (the exact versions in
+`package-lock.json`) · fetch mkcert (checksum-pinned) to `~/.local/bin`, or
+`%LOCALAPPDATA%\puara-server\bin` on Windows, if missing · write
+`config/env-dev.yaml` if it does not exist · issue a certificate in `certs/`
+for the detected LAN IP, hostname and localhost · build the C++ addon if they
+can · build. Use `--no-https` (`-NoHttps` on Windows) for a desktop-only setup
+(no phone sensors).
+
+**Another network or another machine needs no setup — just start.** Every
+start checks the certificate (`scripts/https.mjs`) and reissues it when it
+does not cover the machine's current LAN address (or the host in
+`publicAddress`), expires within 30 days, or was signed by another machine's
+CA. It is always signed by this machine's mkcert CA, so phones that trust that
+CA keep working. On a different machine, phones must install its CA once
+(`--serve-ca`) — or copy the `mkcert -CAROOT` folder over before installing,
+and they won't need to. `serverAddress` stays blank, so phones connect back to
+the address they opened the page from, and the QR codes use the LAN address
+found at start: after a network change, restart. The scripts own `certs/`; a
+certificate you keep elsewhere is checked, never replaced.
 
 Per-OS notes:
 

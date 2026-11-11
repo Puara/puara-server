@@ -4,8 +4,9 @@
 # machine. On Windows, use scripts\install.cmd instead.
 #
 # Safe to rerun: every step checks its own result first and skips if already
-# done. Nothing that already exists is overwritten — not the certificate, not
-# config/env-dev.yaml. Delete the file yourself if you want it regenerated.
+# done. config/env-dev.yaml is written once and kept. The certificate in certs/
+# is reissued only when it no longer fits this machine (scripts/https.mjs,
+# which start.sh also runs), always with the same mkcert CA.
 #
 # No sudo required. mkcert lands in ~/.local/bin. macOS's own bash 3.2 runs
 # this, so keep it that way: no associative arrays, mapfile or ${x,,}.
@@ -44,8 +45,6 @@ case "$(uname -m)" in
 esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CERT_DIR="${REPO_ROOT}/certs"
-ENV_FILE="${REPO_ROOT}/config/env-dev.yaml"
 LOCAL_BIN="${HOME}/.local/bin"
 # macOS gives each user a private TMPDIR; Linux usually leaves it unset
 LOG_DIR="${TMPDIR:-/tmp}"
@@ -57,7 +56,7 @@ WANT_HTTPS=1
 for arg in "$@"; do
   case "$arg" in
     --no-https) WANT_HTTPS=0 ;;
-    -h|--help) sed -n '2,12p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -95,26 +94,11 @@ step "Installing npm dependencies"
 npm ci --no-fund --no-audit
 ok "node_modules ready"
 
-# ------------------------------------------------------- LAN IP detection
-# Skips docker/VM/VPN adapters — phones need the real interface address. In
-# Node, so Linux, macOS and Windows all choose it the same way.
-LAN_IP="$(node scripts/lan-ip.mjs || true)"
-
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'
   else
     shasum -a 256 "$1" | awk '{print $1}'
-  fi
-}
-
-# The bare host name; the certificate also gets <name>.local. macOS answers
-# `hostname` with the .local name already, so ask it for the Bonjour name.
-host_name() {
-  if [ "$OS" = darwin ]; then
-    scutil --get LocalHostName 2>/dev/null || hostname -s
-  else
-    hostname
   fi
 }
 
@@ -156,49 +140,13 @@ if [ "$WANT_HTTPS" -eq 1 ]; then
 
   MKCERT="$(command -v mkcert || echo "${LOCAL_BIN}/mkcert")"
 
-  # ------------------------------------------------------ certificate
-  step "Issuing the LAN certificate"
-  mkdir -p "$CERT_DIR"
-  EXISTING_CERT="$(find "$CERT_DIR" -maxdepth 1 -name '*.pem' ! -name '*-key.pem' | head -1)"
-
-  if [ -n "$EXISTING_CERT" ]; then
-    skip "certificate already present: $(basename "$EXISTING_CERT")"
-    skip "delete certs/*.pem and rerun to reissue (phones keep trusting the same CA)"
-    CERT_FILE="$EXISTING_CERT"
-  elif [ -z "$LAN_IP" ]; then
-    warn "no LAN IP detected — skipping certificate. Connect to a network and rerun."
-    CERT_FILE=""
-  else
-    HOST="$(host_name)"
-    ( cd "$CERT_DIR" && "$MKCERT" "$LAN_IP" "${HOST}.local" "$HOST" localhost 127.0.0.1 )
-    CERT_FILE="$(find "$CERT_DIR" -maxdepth 1 -name '*.pem' ! -name '*-key.pem' | head -1)"
-    ok "certificate issued for ${LAN_IP}"
-  fi
-
-  # --------------------------------------------------- env-dev.yaml
-  step "Writing config/env-dev.yaml"
-  if [ -f "$ENV_FILE" ]; then
-    skip "config/env-dev.yaml exists — left untouched"
-  elif [ -z "$CERT_FILE" ]; then
-    warn "no certificate, so no env-dev.yaml — rerun once you have a LAN IP"
-  else
-    KEY_FILE="${CERT_FILE%.pem}-key.pem"
-    cat > "$ENV_FILE" <<YAML
-type: development
-port: 8000
-serverAddress: '${LAN_IP}'
-useHttps: true
-httpsInfos:
-  cert: ${CERT_FILE}
-  key: ${KEY_FILE}
-baseUrl: ''
-auth:
-  clients: []
-  login: ''
-  password: ''
-YAML
-    ok "config/env-dev.yaml written (gitignored)"
-  fi
+  # ------------------------------------- env-dev.yaml + certificate
+  # Shared with start.sh and the Windows scripts: writes config/env-dev.yaml if
+  # it is missing, then issues the certificate for this machine's LAN address,
+  # host name and localhost — or reissues it when it no longer fits.
+  step "Setting up HTTPS (config/env-dev.yaml, certificate)"
+  node scripts/https.mjs --init --mkcert "$MKCERT" \
+    || { echo "could not set up the certificate — see above." >&2; exit 1; }
 else
   step "Skipping HTTPS setup (--no-https)"
   skip "phones will have no motion sensors over plain HTTP — desktop testing only"

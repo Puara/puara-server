@@ -97,6 +97,15 @@ if (-not (Test-Path '.build\server.js')) {
   Fail '.build\server.js missing - run npm run build (or scripts\install.cmd)'
 }
 
+# ---------------------------------------------------------- certificate
+# A new network, a new machine or a copied folder leaves the certificate
+# without the address phones now use, and they refuse it. Reissued here with
+# the same mkcert CA, so phones that trusted it still do (scripts/https.mjs).
+& node scripts/https.mjs --env $EnvName
+if ($LASTEXITCODE -ne 0) {
+  Warn 'HTTPS not set up for this address - phones may refuse the connection'
+}
+
 # ---------------------------------------------------------- run, teardown
 # The children share this console, so Ctrl-C reaches them directly; `finally`
 # then stops whatever is still running, as start.sh's trap does.

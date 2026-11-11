@@ -1,5 +1,3 @@
-import { networkInterfaces } from 'node:os';
-
 import express from 'express';
 import '@soundworks/helpers/polyfills.js';
 import '@soundworks/helpers/catch-unhandled-errors.js';
@@ -15,6 +13,7 @@ import {
   nativeGesturesDescription,
 } from './shared/schemas.js';
 import { loadPuaraConfig } from './shared/load-puara-config.js';
+import { lanAddress } from './shared/lan-address.js';
 import { SURFACES_DIR, loadSurfaces, watchSurfaces } from './shared/load-surfaces.js';
 import { REGIONS_SURFACE, normalizeParams } from './shared/surfaces.js';
 
@@ -53,21 +52,11 @@ const protocol = useHttps ? 'https' : 'http';
 
 // QR codes must point at an address a phone can reach, which is never the
 // dashboard's own origin when the operator opens it on localhost. Prefer the
-// configured public address, then serverAddress, then the first non-internal
-// IPv4 interface.
-function detectLanAddress() {
-  for (const addresses of Object.values(networkInterfaces())) {
-    for (const address of addresses || []) {
-      if (address.family === 'IPv4' && !address.internal) {
-        return address.address;
-      }
-    }
-  }
-  return '127.0.0.1';
-}
-
+// configured public address, then a fixed serverAddress, then this machine's
+// LAN address as the installers and the certificate see it — found again at
+// every start, so a new network needs nothing but a restart.
 const publicAddress = puara.publicAddress
-  || `${protocol}://${serverAddress || detectLanAddress()}:${port}`;
+  || `${protocol}://${serverAddress || lanAddress() || '127.0.0.1'}:${port}`;
 
 // ## touch surfaces — the plugins on disk, and each one's settings
 function warnParam(id, source) {

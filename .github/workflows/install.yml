@@ -86,6 +86,27 @@ jobs:
           ls certs/
           exit $status
 
+      # A network change, faked with --ip: the next start must reissue the
+      # certificate for the new address with the same CA, and clear a fixed
+      # serverAddress left by an older install. The last run is on the real
+      # address again, as the smoke test that follows expects.
+      - name: Certificate follows a network change
+        shell: bash
+        run: |
+          set -e
+          log="$RUNNER_TEMP/https.txt"
+          grep -qE "^serverAddress: (''|\"\")" config/env-dev.yaml
+          node scripts/https.mjs --ip 10.99.99.99 | tee "$log"
+          grep -q "Certificate reissued" "$log"
+          grep -q "Signed by this machine's CA" "$log"
+          node scripts/https.mjs --ip 10.99.99.99 | tee "$log"
+          grep -q "Certificate ok for 10.99.99.99" "$log"
+          sed -i.bak "s/^serverAddress: .*/serverAddress: '10.99.99.99'/" config/env-dev.yaml
+          rm config/env-dev.yaml.bak
+          node scripts/https.mjs | tee "$log"
+          grep -q "serverAddress 10.99.99.99 cleared" "$log"
+          grep -qE "^serverAddress: (''|\"\")" config/env-dev.yaml
+
       - name: Start, fetch the pages, stop
         env:
           REQUIRE_ADDON: '1'

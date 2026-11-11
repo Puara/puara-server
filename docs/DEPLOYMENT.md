@@ -16,22 +16,41 @@ installed on the test phones so certificates are fully trusted.
 
 ### Server side
 
-```sh
-mkcert -install
-mkcert 10.10.30.152 my-workstation.local localhost 127.0.0.1
-# → produces e.g. 10.10.30.152+3.pem / 10.10.30.152+3-key.pem
-```
+`scripts/install.sh` (`scripts\install.cmd` on Windows) does all of it, and
+every `start` keeps it current through `scripts/https.mjs`:
 
-Create `config/env-dev.yaml` (gitignored):
+- **`config/env-dev.yaml`** (gitignored) is written once, with
+  `serverAddress: ''`. Blank on purpose: phones open their WebSocket to the
+  address they loaded the page from, and the bridge to 127.0.0.1, so no IP is
+  fixed anywhere. An older file with an IP there gets it cleared on the next
+  start.
+- **`certs/server.pem`** is issued by this machine's mkcert CA for the LAN IP,
+  `<hostname>.local`, the hostname, localhost and 127.0.0.1 — plus the host of
+  `publicAddress` when `config/puara.yaml` sets one. Each start reissues it
+  when it no longer covers those, expires within 30 days, or was signed by
+  another machine's CA (a copied folder). Same CA, so enrolled phones keep
+  trusting it.
+
+Moving to another network is therefore a restart. Moving to another machine
+is a clone and an install; to spare the phones a new CA, copy the
+`mkcert -CAROOT` folder across first. A certificate kept outside `certs/` —
+tier 2's — is checked against `publicAddress` but never replaced.
+
+By hand, the equivalent is:
+
+```sh
+mkcert -cert-file certs/server.pem -key-file certs/server-key.pem \
+  10.10.30.152 my-workstation.local my-workstation localhost 127.0.0.1
+```
 
 ```yaml
 type: development
 port: 8000
-serverAddress: '10.10.30.152'
+serverAddress: ''
 useHttps: true
 httpsInfos:
-  cert: /absolute/path/to/10.10.30.152+3.pem
-  key: /absolute/path/to/10.10.30.152+3-key.pem
+  cert: /absolute/path/to/puara-server/certs/server.pem
+  key: /absolute/path/to/puara-server/certs/server-key.pem
 baseUrl: ''
 auth:
   clients: []
@@ -39,7 +58,8 @@ auth:
   password: ''
 ```
 
-Run with `ENV=dev npm run dev` (or `ENV=dev npm start` + `ENV=dev npm run bridge`).
+Run with `./scripts/start.sh` (or `ENV=dev npm start` + `ENV=dev npm run
+bridge`, which skip the certificate check).
 
 ### Phone side (once per test device)
 
